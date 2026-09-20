@@ -110,7 +110,7 @@ Point at the grounding check.
 
 > "And this is the part I'd want a judge to look at. After it writes the answer, we extract every financial figure from the prose and match it back against what the tools actually returned. Seven of seven grounded, each with the source named."
 
-> "Because the model never calculates. Twelve tools wrap the engine; the system prompt says arithmetic in its head is a bug. The recommendations come from a deterministic rule engine, so two users with the same balance sheet get the same list. The model's job is to explain which one matters for *her*, and why. That's what makes this auditable instead of just fluent."
+> "Because the model never calculates. Thirteen tools wrap the engine; the system prompt says arithmetic in its head is a bug. The recommendations come from a deterministic rule engine, so two users with the same balance sheet get the same list. The model's job is to explain which one matters for *her*, and why. That's what makes this auditable instead of just fluent."
 
 Optional, if you have 20 seconds:
 

@@ -2,6 +2,7 @@ import type Anthropic from '@anthropic-ai/sdk';
 import {
   ASSET_CLASSES,
   buildSnapshot,
+  computeActionImpact,
   describeLevers,
   planDebtPayoff,
   planningHorizon,
@@ -445,6 +446,69 @@ export const TOOLS: ToolDefinition[] = [
         // The action prose quotes goal and cashflow figures, so the whole
         // snapshot fact set travels with it.
         facts: snapshotFacts(snapshot),
+      };
+    },
+  },
+
+  {
+    name: 'estimate_action_impact',
+    label: 'Costing out the plan',
+    description:
+      "Reports what following the top-ranked actions would actually change: wellness score, retirement funded percentage, median corpus and emergency cover, before and after, with each action's marginal contribution. Use when asked whether the advice is worth following, what difference it makes, or which action matters most. Only counts actions the platform can apply and the user can afford - everything else is returned as not modelled, and must not be described as part of the gain.",
+    inputSchema: {
+      type: 'object',
+      properties: {
+        top: { type: 'number', description: 'How many applicable actions to include (default 3)' },
+      },
+      required: [],
+    },
+    handler: (input: { top?: number }, ctx) => {
+      const topN = Math.min(Math.max(Math.trunc(input.top ?? 3), 1), 10);
+      const impact = computeActionImpact({ profile: ctx.profile, topN });
+
+      if (impact.noop) {
+        return {
+          summary:
+            'Nothing in the ranked list can be applied by the platform for this profile, so there is no modelled impact to report. Every remaining action needs the user to act themselves.',
+          data: impact,
+          facts: {},
+        };
+      }
+
+      const lines = [
+        `Following the top ${impact.applied.length} applicable actions:`,
+        `- Wellness score ${impact.before.wellnessScore} (${impact.before.wellnessGrade}) to ${impact.after.wellnessScore} (${impact.after.wellnessGrade})`,
+        `- Retirement funded ${(impact.before.retirementFundedPct * 100).toFixed(0)}% to ${(impact.after.retirementFundedPct * 100).toFixed(0)}%`,
+        `- Median corpus ${money(impact.before.medianCorpusAtRetirement, ctx)} to ${money(impact.after.medianCorpusAtRetirement, ctx)}`,
+        `- Emergency cover ${impact.before.emergencyFundMonths.toFixed(1)} to ${impact.after.emergencyFundMonths.toFixed(1)} months`,
+        '',
+        'Marginal contribution of each, applied in rank order:',
+        ...impact.applied.map(
+          (a) =>
+            `- ${a.title}: wellness ${a.marginal.wellnessScore >= 0 ? '+' : ''}${a.marginal.wellnessScore}, median corpus ${a.marginal.medianCorpusAtRetirement >= 0 ? '+' : ''}${money(a.marginal.medianCorpusAtRetirement, ctx)}`,
+        ),
+        '',
+        `${impact.notModelled.length} further actions are NOT included in these figures - they need the user to buy a policy, refinance or open an account, or would cost more per month than the surplus covers.`,
+      ];
+
+      return {
+        summary: lines.join('\n'),
+        data: impact,
+        facts: {
+          'wellness score before': impact.before.wellnessScore,
+          'wellness score after': impact.after.wellnessScore,
+          'retirement funded before': impact.before.retirementFundedPct,
+          'retirement funded after': impact.after.retirementFundedPct,
+          'median corpus before': impact.before.medianCorpusAtRetirement,
+          'median corpus after': impact.after.medianCorpusAtRetirement,
+          'emergency cover before': impact.before.emergencyFundMonths,
+          'emergency cover after': impact.after.emergencyFundMonths,
+          'actions counted': impact.applied.length,
+          'actions not counted': impact.notModelled.length,
+          ...Object.fromEntries(
+            impact.applied.map((a) => [`${a.id} marginal corpus`, a.marginal.medianCorpusAtRetirement]),
+          ),
+        },
       };
     },
   },

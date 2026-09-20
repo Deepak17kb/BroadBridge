@@ -19,6 +19,8 @@ import {
   weightsFromHoldings,
 } from '../src/finance/portfolio.js';
 import { scoreRisk } from '../src/finance/risk.js';
+import { applyActionMutation } from '../src/finance/mutations.js';
+import { computeActionImpact } from '../src/impact.js';
 import { futureValueLumpSum, steppedAnnuityFactor, sum } from '../src/finance/math.js';
 import type { Goal, UserProfile } from '../src/types.js';
 
@@ -542,6 +544,130 @@ test('a user-edited health-cover assumption re-scores the gap', () => {
     (raised.evidence?.['health cover gap'] ?? 0) > (base.evidence?.['health cover gap'] ?? 0),
     'doubling the income multiple must widen the gap',
   );
+});
+
+/* -------------------------------------------------------------------------- */
+/* Action impact                                                               */
+/* -------------------------------------------------------------------------- */
+
+for (const p of PERSONAS) {
+  test(`impact for ${p.id} is real, finite and adds up`, () => {
+    const impact = computeActionImpact({ profile: p.profile, topN: 3, now: FIXED_NOW });
+
+    assert.ok(impact.applied.length > 0, 'every persona has something the platform can do for them');
+    assert.ok(impact.applied.length <= 3);
+    assert.equal(impact.noop, false);
+
+    for (const metrics of [impact.before, impact.after]) {
+      for (const [key, value] of Object.entries(metrics)) {
+        if (typeof value === 'number') {
+          assert.ok(Number.isFinite(value), `${key} is finite`);
+        }
+      }
+    }
+
+    // The marginals are the whole claim: applied cumulatively in rank order,
+    // they must reconstruct the headline exactly, or the breakdown is decorative.
+    const summed = impact.applied.reduce((acc, a) => acc + a.marginal.wellnessScore, 0);
+    assert.ok(
+      Math.abs(impact.after.wellnessScore - impact.before.wellnessScore - summed) < 0.05,
+      `marginal wellness deltas must sum to the headline change (got ${summed})`,
+    );
+
+    const summedCorpus = impact.applied.reduce(
+      (acc, a) => acc + a.marginal.medianCorpusAtRetirement,
+      0,
+    );
+    assert.ok(
+      Math.abs(
+        impact.after.medianCorpusAtRetirement - impact.before.medianCorpusAtRetirement - summedCorpus,
+      ) < 1,
+      'marginal corpus deltas must sum to the headline change',
+    );
+
+    // Nothing that cannot be applied may hide inside the headline.
+    const appliedIds = new Set(impact.applied.map((a) => a.id));
+    assert.ok(
+      impact.notModelled.every((n) => !appliedIds.has(n.id)),
+      'an action is counted or excluded, never both',
+    );
+    assert.ok(
+      impact.notModelled.every((n) => n.why.length > 10),
+      'every excluded action says why',
+    );
+  });
+}
+
+test('impact is reproducible: the same plan reports the same numbers', () => {
+  const profile = persona('meera');
+  const a = computeActionImpact({ profile, topN: 3, now: FIXED_NOW });
+  const b = computeActionImpact({ profile, topN: 3, now: FIXED_NOW });
+  assert.deepEqual(a, b, 'a seeded simulation and deterministic mutations must not wobble');
+
+  // And it must not mutate the profile it was handed.
+  assert.deepEqual(profile, persona('meera'), 'computeActionImpact does not touch its input');
+});
+
+test('impact never counts an action the user cannot fund', () => {
+  // The fund-goal rules mutate a contribution by the whole monthly gap whether
+  // or not the surplus covers it. Counted naively that produced "retirement
+  // funded 41% -> 459%" for a profile running a monthly deficit.
+  for (const p of PERSONAS) {
+    const impact = computeActionImpact({ profile: p.profile, topN: 3, now: FIXED_NOW });
+    if (impact.before.monthlySurplus >= 0) {
+      assert.ok(
+        impact.after.monthlySurplus >= 0,
+        `${p.id}: a positive surplus must not be spent into deficit`,
+      );
+    } else {
+      assert.ok(
+        impact.after.monthlySurplus >= impact.before.monthlySurplus,
+        `${p.id}: an existing deficit must not be made worse`,
+      );
+    }
+  }
+
+  // The excluded ones are reported with the arithmetic, not silently dropped.
+  const rohan = computeActionImpact({ profile: persona('rohan'), topN: 3, now: FIXED_NOW });
+  const skipped = rohan.notModelled.filter((n) => n.why.startsWith('Worth doing'));
+  assert.ok(skipped.length > 0, 'Rohan cannot fund a 7.25 L/month contribution increase');
+});
+
+test('an already-optimised plan reports zero impact without dividing by zero', () => {
+  const profile = persona('rohan');
+
+  // Apply everything the platform can, repeatedly, until nothing is left that
+  // both applies and is affordable.
+  for (let i = 0; i < 12; i++) {
+    const impact = computeActionImpact({ profile, topN: 5, now: FIXED_NOW });
+    if (impact.noop) break;
+    const snapshot = buildSnapshot(profile, FIXED_NOW);
+    for (const contribution of impact.applied) {
+      const action = snapshot.actions.find((a) => a.id === contribution.id);
+      if (action?.apply) {
+        applyActionMutation(profile, action.apply, {
+          recommendedAllocation: snapshot.recommendedAllocation,
+        });
+      }
+    }
+  }
+
+  const settled = computeActionImpact({ profile, topN: 5, now: FIXED_NOW });
+  for (const value of Object.values(settled.after)) {
+    if (typeof value === 'number') assert.ok(Number.isFinite(value));
+  }
+  if (settled.noop) {
+    assert.deepEqual(settled.after, settled.before, 'nothing applied means nothing changed');
+    assert.equal(settled.applied.length, 0);
+  }
+});
+
+test('a retired profile does not divide by zero in the simulation', () => {
+  const profile = persona('rohan');
+  profile.retirementAge = profile.age; // no years left to accumulate
+  const impact = computeActionImpact({ profile, topN: 3, now: FIXED_NOW });
+  assert.ok(Number.isFinite(impact.before.medianCorpusAtRetirement));
+  assert.ok(Number.isFinite(impact.after.medianCorpusAtRetirement));
 });
 
 test('education inflation override is respected', () => {

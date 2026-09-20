@@ -168,6 +168,17 @@ Avalanche versus snowball, with the interest and months each saves.
 { "extraMonthly": 10000 }
 ```
 
+### `GET /api/plan/:id/impact?top=3`
+
+What following the top-ranked actions is actually worth. Returns `before` and `after` metrics — wellness score and grade, retirement funded, goals on track, interest paid and months to debt-free, median corpus at retirement, emergency cover, monthly surplus — plus `applied`, each action's **marginal** contribution with the ones above it already in place, and `notModelled`, everything excluded and why.
+
+Two rules keep the figure honest, and both are visible in the response:
+
+- **Only actions the platform can carry out are counted.** Four of the fifteen rules carry a machine-applicable mutation; the rest need the user to buy a policy, refinance or open an account. Those arrive in `notModelled` rather than inside the headline.
+- **Only actions the user can fund are counted.** The `fund-goal-*` rules mutate a contribution by the whole monthly gap regardless of surplus. Counted naively that reported "retirement funded 41% → 459%" for a profile already running a deficit. An action that would push the surplus below zero is excluded, with the arithmetic in its `why`.
+
+Deterministic: the simulation is seeded, and the mutations use fixed ids, so the same plan always reports the same numbers. `top` is clamped to 1–10 and counts *applicable, affordable* actions, so the walk continues down the ranked list until it finds that many.
+
 ### `GET /api/plan/:id/allocation?years=20`
 
 The five model portfolios with their expected return and volatility, so the recommended mix can be compared against the alternatives rather than simply asserted.
@@ -255,7 +266,7 @@ BM25 search over the knowledge base. Omit `q` to list every document. Exposed so
 
 ## Agent tools
 
-The twelve tools the agent can call. Each wraps the shared engine — the model chooses *which* questions to ask and *how* to explain the answers; it never computes a number itself.
+The thirteen tools the agent can call. Each wraps the shared engine — the model chooses *which* questions to ask and *how* to explain the answers; it never computes a number itself.
 
 | Tool | What it does |
 |---|---|
@@ -271,6 +282,7 @@ The twelve tools the agent can call. Each wraps the shared engine — the model 
 | `search_knowledge` | Retrieves the planning principle behind a recommendation |
 | `update_plan` | Applies a change the user explicitly asked for |
 | `list_scenario_presets` | What the user can explore |
+| `estimate_action_impact` | What following the top actions is worth, before and after, with each one's marginal contribution |
 
 Each returns three things: a `summary` for the trace and for the model to reason over, `data` for the UI to render as a card, and `facts` — every number the tool produced, which the grounding verifier uses to check the final answer.
 

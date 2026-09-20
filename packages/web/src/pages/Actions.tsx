@@ -1,6 +1,6 @@
 import { useMemo, useState } from 'react';
 import {
-  ASSET_CLASSES,
+  applyActionMutation,
   formatCompact,
   type ActionCategory,
   type NextBestAction,
@@ -67,46 +67,12 @@ export function Actions() {
     const mutation = action.apply;
     if (!mutation) return;
 
+    // The engine owns what each mutation means, so the button and the impact
+    // figure on the dashboard cannot promise different outcomes.
     updateProfile((draft) => {
-      switch (mutation.type) {
-        case 'increase_goal_contribution': {
-          const goal = draft.goals.find((g) => g.id === mutation.goalId);
-          if (goal) goal.monthlyContribution += mutation.amount;
-          break;
-        }
-        case 'set_emergency_fund':
-          draft.liquidSavings = Math.max(draft.liquidSavings, mutation.amount);
-          break;
-        case 'set_allocation':
-        case 'rebalance_to_target': {
-          // Rebalancing is modelled by restating the holdings at the target
-          // weights, keeping the total value fixed. Real trades have costs and
-          // tax consequences the engine deliberately does not pretend to know.
-          const weights =
-            mutation.type === 'set_allocation' ? mutation.weights : snapshot.recommendedAllocation;
-          const investable = draft.holdings.reduce((acc, h) => acc + h.units * h.price, 0);
-          if (investable <= 0) break;
-          const existing = new Map(draft.holdings.map((h) => [h.assetClass, h] as const));
-          draft.holdings = ASSET_CLASSES.filter((ac) => (weights[ac] ?? 0) > 0.001).map((ac) => {
-            const target = (weights[ac] ?? 0) * investable;
-            const current = existing.get(ac);
-            return current
-              ? { ...current, units: 1, price: target }
-              : {
-                  id: `h-${ac}-${Date.now()}`,
-                  symbol: ac.toUpperCase().slice(0, 8),
-                  name: `${ac.replace(/_/g, ' ')} allocation`,
-                  assetClass: ac,
-                  units: 1,
-                  price: target,
-                  costBasis: target,
-                  instrumentKind: 'fund' as const,
-                  expenseRatioPct: 0.002,
-                };
-          });
-          break;
-        }
-      }
+      applyActionMutation(draft, mutation, {
+        recommendedAllocation: snapshot.recommendedAllocation,
+      });
     });
     setApplied((a) => [...a, action.id]);
   }

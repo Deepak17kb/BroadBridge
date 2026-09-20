@@ -101,6 +101,8 @@ Pure functions over plain data. No classes, no I/O, no framework — which is wh
 | `finance/cashflow.ts` | Cashflow, net worth, retirement sizing with drawdown, debt payoff, wellness score |
 | `finance/actions.ts` | Fifteen-rule recommendation engine |
 | `finance/engine.ts` | Composition: `buildSnapshot` and `runScenario` |
+| `finance/mutations.ts` | The four machine-applicable action mutations, shared by the Apply button and the impact calculation |
+| `impact.ts` | What following the top actions is worth: cumulative application, marginal attribution, affordability gate |
 
 ### Four choices that matter
 
@@ -155,7 +157,7 @@ Holdings now carry `instrumentKind: 'fund' | 'security' | 'deposit'`, and the sc
 
 ### The division of labour
 
-**The model narrates and prioritises. It never calculates.** Twelve tools wrap the engine; the system prompt states that arithmetic done in the model's head is a bug. Recommendations come from the deterministic rule engine, so two users with the same balance sheet get the same list in the same order — and the model's job is to explain which one matters for *this* person and why.
+**The model narrates and prioritises. It never calculates.** Thirteen tools wrap the engine; the system prompt states that arithmetic done in the model's head is a bug. Recommendations come from the deterministic rule engine, so two users with the same balance sheet get the same list in the same order — and the model's job is to explain which one matters for *this* person and why.
 
 This is not caution for its own sake. It makes the advice reproducible, testable and auditable, and it removes the main route by which a hallucinated figure could reach a user.
 

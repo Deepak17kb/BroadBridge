@@ -1,13 +1,17 @@
+import { useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
 import {
   ASSET_LABELS,
   formatCompact,
   formatCurrency,
   formatPercent,
+  type ActionImpact,
   type NextBestAction,
 } from '@wealth/shared';
+import { api } from '../lib/api';
 import { useLoadedProfile } from '../state/ProfileContext';
 import { AssumptionList, Badge, Callout, Card, ProgressBar, ScoreRing, Stat } from '../components/ui';
+import { ImpactHero } from '../components/ImpactHero';
 import {
   AllocationBar,
   AllocationLegend,
@@ -36,6 +40,29 @@ export function Dashboard() {
   const topAction: NextBestAction | undefined = snapshot.actions[0];
   const firstName = profile.displayName.split(' ')[0] || 'there';
 
+  /*
+   * The impact figure is computed server-side rather than in the browser: it
+   * runs three cumulative snapshots and three seeded 1,500-path simulations,
+   * which is real work to do on the render thread every time a slider moves
+   * somewhere else in the app. It refetches when the profile is saved, so
+   * applying an action updates the headline it came from.
+   */
+  const [impact, setImpact] = useState<ActionImpact | null>(null);
+  const [impactLoading, setImpactLoading] = useState(true);
+
+  useEffect(() => {
+    let cancelled = false;
+    setImpactLoading(true);
+    api
+      .impact(profile.id, 3)
+      .then((r) => !cancelled && setImpact(r))
+      .catch(() => !cancelled && setImpact(null))
+      .finally(() => !cancelled && setImpactLoading(false));
+    return () => {
+      cancelled = true;
+    };
+  }, [profile.id, profile.updatedAt]);
+
   return (
     <div className="stack">
       <header className="page-head">
@@ -59,6 +86,9 @@ export function Dashboard() {
           </Link>
         </div>
       </header>
+
+      {/* What the advice is worth, before the advice itself. */}
+      <ImpactHero impact={impact} currency={currency} loading={impactLoading} />
 
       {/* Headline: one score, its drivers, and the immediate next step. */}
       <div className="grid grid-sidebar">

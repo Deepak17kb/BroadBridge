@@ -16,5 +16,7 @@ export * from './finance/goals.js';
 export * from './finance/montecarlo.js';
 export * from './finance/cashflow.js';
 export * from './finance/actions.js';
+export * from './finance/mutations.js';
 export * from './finance/engine.js';
 export * from './data/personas.js';
+export * from './impact.js';

@@ -168,6 +168,9 @@ export const api = {
       }[]
     >(`/plan/${id}/allocation${years ? `?years=${years}` : ''}`),
 
+  impact: (id: string, top = 3) =>
+    request<import('@wealth/shared').ActionImpact>(`/plan/${id}/impact?top=${top}`),
+
   sessions: (id: string) =>
     request<{ id: string; updatedAt: string; messageCount: number; preview: string }[]>(
       `/agent/${id}/sessions`,

@@ -361,3 +361,97 @@ exists to prevent.
 the multiple lowers the Protection score, so the two cannot drift apart again.
 Persona wellness scores shift by a point or two where cover was thin; no test
 encoded an exact total. Shared tests 52 → 53.
+
+---
+
+## T4 — The "value created" hero metric  [done]
+
+**Files touched**
+- `packages/shared/src/finance/mutations.ts` (new) — the four machine-applicable
+  mutations, lifted out of `Actions.tsx`
+- `packages/shared/src/impact.ts` (new) — `computeActionImpact`
+- `packages/shared/src/index.ts` — exports both
+- `packages/web/src/pages/Actions.tsx` — Apply now calls the shared applier
+- `packages/web/src/components/ImpactHero.tsx` (new) — the dashboard card
+- `packages/web/src/pages/Dashboard.tsx` — hero above the wellness score
+- `packages/web/src/lib/api.ts` — `api.impact`
+- `packages/server/src/routes/planning.ts` — `GET /api/plan/:id/impact?top=`
+- `packages/server/src/agent/tools.ts` — `estimate_action_impact`
+- `packages/shared/test/engine.test.ts` — 7 new tests
+- `docs/API.md`, `docs/ARCHITECTURE.md`, `docs/DEMO_SCRIPT.md`
+
+**The headline was overstated on the first working version, and the fix is the
+most important thing in this task.** The first run reported, for Aarav:
+
+```
+retirement funded 41% -> 459%     applied: Add 73.6k/month to "Retirement"
+```
+
+against a profile whose monthly surplus is **−₹1,200**. The `fund-goal-*` rules
+mutate a contribution by the whole monthly gap whether or not the surplus covers
+it, and the wellness score *rises* when contributions rise, because the savings
+rate does — so the plan nobody could run was graded higher for saying so. The
+same bug sat behind Rohan's "Add 7.25 L/month".
+
+An action is now counted only if it leaves the surplus non-negative, or at least
+no worse than it already was. Excluded ones appear in `notModelled` carrying the
+arithmetic: *"it would need about 73,610 a month against a surplus of −1,200."*
+The honest headlines:
+
+| Persona | Wellness | Retirement funded | Emergency cover | Counted / excluded |
+|---|---|---|---|---|
+| Aarav | 43 D → 57 C | 41% → 41% | 1.3m → 6.0m | 2 of 10 |
+| Meera | 60 C → 62 C | 60% → 60% | 4.5m → 6.0m | 3 of 12 |
+| Rohan | 72 B → 76 B | 89% → 89% | 8.3m → 8.3m | 2 of 10 |
+
+**Decisions I made without asking**
+- **Extracted the mutation appliers into `@wealth/shared`.** The brief says to use
+  "the existing mutation appliers" — they lived inside a React component, so
+  there was nothing shared to use. Both the Apply button and the impact figure now
+  call the same code; if they had diverged, the platform would promise one outcome
+  and deliver another.
+- **Rebalance holdings get deterministic ids** (`h-<class>-rebalanced`, previously
+  `h-<class>-${Date.now()}`). Impact applies the mutations repeatedly and has to
+  produce a byte-identical profile each time; a timestamped id made the whole
+  calculation non-reproducible.
+- **`estimate_action_impact` is a new 13th tool, not a fact bolted onto
+  `get_next_best_actions`.** The brief says "expose as an agent tool fact" and its
+  T5 note assumes the count stays at 12. Folding it in would make the single most
+  commonly called tool run three cumulative snapshots and three 1,500-path
+  simulations on every question. **Tool count is now 13, so T5 takes it to 14.**
+- **`top` counts applicable, affordable actions**, so the walk continues down the
+  ranked list until it finds that many, rather than stopping at the first three
+  and reporting two.
+- **The impact call is server-side, refetched on save.** Three cumulative
+  snapshots plus three seeded simulations is not work for the render thread.
+- **Negative marginals are shown, not hidden.** Meera's `align-allocation` scores
+  −1 wellness and −₹30 L on the median corpus: raising equity raises the expected
+  return *and* the variance drag, which lowers the median. An assumption line on
+  the card explains it. Suppressing it would be the same dishonesty as the 459%.
+
+**Tests added (7)** — real output:
+```
+ℹ tests 60   ℹ pass 60   ℹ fail 0      (shared — was 53)
+ℹ tests 44   ℹ pass 44   ℹ fail 0      (server)
+ℹ tests 29   ℹ pass 29   ℹ fail 0      (web)
+$ npm run lint       → LINT=0
+$ npm run typecheck  → clean
+$ npm run build      → BUILD=0
+```
+Total **133**. One per persona asserting the metrics are finite and that the
+marginal deltas sum to the headline change (the claim the breakdown makes);
+reproducibility including "does not mutate its input"; the affordability gate
+across all three personas; an already-optimised plan settling to a no-op without
+dividing by zero; and a retired profile (zero years to accumulate) not dividing
+by zero in the simulation.
+
+**Anything I deliberately left out**
+- **The Apply button still applies the full, unaffordable contribution.** The
+  impact figure now refuses to count it, but clicking Apply on the Actions page
+  still writes a plan the user cannot fund. Fixing that changes existing
+  behaviour users may have relied on, and **T9 rebuilds this path deliberately**
+  (proposal + before/after diff + explicit approval). It belongs there, not
+  smuggled in here. Until then the two disagree, and the impact card is the
+  conservative one.
+- No UI test for the hero card — same SSR-only limitation as T3. The endpoint and
+  the engine beneath it are covered.

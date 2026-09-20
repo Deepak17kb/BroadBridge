@@ -2,6 +2,7 @@ import { Router } from 'express';
 import { z } from 'zod';
 import {
   buildSnapshot,
+  computeActionImpact,
   planDebtPayoff,
   planningHorizon,
   portfolioExpectedReturn,
@@ -254,5 +255,27 @@ router.get(
         };
       }),
     );
+  }),
+);
+
+/**
+ * What following the top-ranked actions is actually worth.
+ *
+ * The engine could always compute this - rank actions, apply them, re-score the
+ * plan - and nothing ever put the three together. `top` bounds how many of the
+ * *applicable* actions are counted; the rest come back in `notModelled` so the
+ * headline figure can never quietly absorb advice the platform cannot carry out.
+ */
+router.get(
+  '/:id/impact',
+  asyncHandler(async (req, res) => {
+    const store = await getStore();
+    const profile = await store.getProfile(req.params.id as string);
+    if (!profile) throw notFound('Profile');
+
+    const requested = Number(req.query.top);
+    const topN = Number.isFinite(requested) ? Math.min(Math.max(Math.trunc(requested), 1), 10) : 3;
+
+    res.json(computeActionImpact({ profile, topN }));
   }),
 );
