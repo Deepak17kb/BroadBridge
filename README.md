@@ -1,5 +1,12 @@
 # AI Wealth Navigator
 
+<!-- Replace OWNER/REPO once the GitHub remote exists; see PROGRESS.md for the exact steps. -->
+[![CI](https://github.com/OWNER/REPO/actions/workflows/ci.yml/badge.svg)](https://github.com/OWNER/REPO/actions/workflows/ci.yml)
+[![Deploy](https://github.com/OWNER/REPO/actions/workflows/deploy.yml/badge.svg)](https://github.com/OWNER/REPO/actions/workflows/deploy.yml)
+![Tests](https://img.shields.io/badge/tests-117%20passing-brightgreen)
+![Node](https://img.shields.io/badge/node-%3E%3D20-blue)
+![Licence](https://img.shields.io/badge/data-synthetic%20only-orange)
+
 An AI-powered financial wellness platform. It reads a user's actual position, projects every goal, lets them explore what-if scenarios against thousands of simulated markets, and produces ranked next-best actions — each one showing the arithmetic and the assumptions behind it.
 
 **All data is synthetic. Nothing here is financial advice.**

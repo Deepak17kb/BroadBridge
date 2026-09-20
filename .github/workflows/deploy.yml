@@ -63,8 +63,15 @@ jobs:
           aws-region: ${{ env.AWS_REGION }}
           role-session-name: wealth-navigator-deploy-${{ github.run_id }}
 
+      # The app defines two stacks - the application and the one-off GitHub
+      # deploy role - so the stack name is required. The pipeline must never
+      # touch the role stack: that role is what grants the pipeline its access,
+      # and letting a deploy modify it would let a compromised workflow widen
+      # its own permissions.
       - name: Show the planned changes
-        run: npx cdk diff -c stage=${{ github.event.inputs.stage || 'staging' }}
+        run: |
+          STAGE="${{ github.event.inputs.stage || 'staging' }}"
+          npx cdk diff "WealthNavigator-$STAGE" -c stage="$STAGE"
         working-directory: infra
         # A diff against a stack that does not exist yet is an expected failure
         # on the very first deploy, so it must not block one.
@@ -73,8 +80,9 @@ jobs:
       - name: Deploy
         id: deploy
         run: |
-          npx cdk deploy \
-            -c stage=${{ github.event.inputs.stage || 'staging' }} \
+          STAGE="${{ github.event.inputs.stage || 'staging' }}"
+          npx cdk deploy "WealthNavigator-$STAGE" \
+            -c stage="$STAGE" \
             --require-approval never \
             --outputs-file cdk-outputs.json
         working-directory: infra

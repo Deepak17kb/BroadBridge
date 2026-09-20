@@ -48,7 +48,9 @@ phases:
           exit 0
         fi
       - echo "Deploying stage $STAGE"
-      - cd infra && npx cdk deploy -c stage=$STAGE --require-approval never --outputs-file cdk-outputs.json
+      # Stack name is explicit: the app also defines the one-off GitHub deploy
+      # role stack, which no pipeline should ever modify.
+      - cd infra && npx cdk deploy "WealthNavigator-$STAGE" -c stage=$STAGE --require-approval never --outputs-file cdk-outputs.json
       - cat cdk-outputs.json
 
 artifacts:
