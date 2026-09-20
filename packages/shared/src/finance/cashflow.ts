@@ -8,6 +8,7 @@ import type {
   UserProfile,
   WellnessScore,
 } from '../types.js';
+import { healthCoverTarget } from '../assumptions.js';
 import { holdingValue } from './portfolio.js';
 import {
   accumulate,
@@ -383,9 +384,25 @@ export function scoreWellness(
   const lifeNeeded = annualIncome * 10;
   const lifeScore =
     lifeNeeded > 0 ? clamp(((profile.lifeInsuranceCover ?? 0) / lifeNeeded) * 100, 0, 100) : 0;
-  const healthScore = hasIncome
-    ? clamp(((profile.healthInsuranceCover ?? 0) / (annualIncome * 0.5 || 1)) * 100, 0, 100)
+  /*
+   * Scored against the same target the `close-health-cover-gap` rule uses, not
+   * a second hardcoded multiple. This pillar used `annualIncome * 0.5`, which
+   * silently ignored the age floor, the per-dependent loading, and any figure
+   * the user had edited in the ledger - so raising the multiple changed the
+   * action and left the score that grades it untouched.
+   */
+  const healthNeeded = hasIncome
+    ? healthCoverTarget({
+        annualIncome,
+        age: profile.age,
+        dependents: profile.dependents,
+        assumptions,
+      })
     : 0;
+  const healthScore =
+    healthNeeded > 0
+      ? clamp(((profile.healthInsuranceCover ?? 0) / healthNeeded) * 100, 0, 100)
+      : 0;
   const protection = bufferScore * 0.5 + lifeScore * 0.3 + healthScore * 0.2;
 
   // Cashflow: a 20% savings rate scores full marks.

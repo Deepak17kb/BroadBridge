@@ -346,3 +346,18 @@ read, and a second delete still returns 204.
 - Restored tool calls show name, label and timing but no summary, because summaries
   were never persisted. Persisting them would change the stored session shape and
   grow every item — worth doing in T7 when snapshots arrive, not silently here.
+
+### T2 correction — the wellness pillar already scored health cover
+
+My T2 note said "the Protection wellness pillar still scores life cover only".
+That was wrong: `scoreWellness` has always scored health cover as 20% of the
+Protection pillar — using its own hardcoded `annualIncome * 0.5`, with no age
+floor, no dependent loading and no way for the ledger to reach it. Raising
+`healthCoverIncomeMultiple` moved the action and left the score that grades it
+untouched: two models of the same thing, which is precisely what constraint 1
+exists to prevent.
+
+`scoreWellness` now calls `healthCoverTarget()`, and a test asserts that raising
+the multiple lowers the Protection score, so the two cannot drift apart again.
+Persona wellness scores shift by a point or two where cover was thin; no test
+encoded an exact total. Shared tests 52 → 53.

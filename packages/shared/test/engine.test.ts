@@ -504,6 +504,27 @@ test('the health-cover target is the higher of the income rule and the age floor
   );
 });
 
+test('the wellness pillar scores health cover against the same target the rule uses', () => {
+  // These were two different models: the pillar hardcoded 0.5x income while the
+  // rule used the editable multiple, the age floor and the dependent loading. A
+  // user raising the multiple saw the action change and the score that grades
+  // them stay put.
+  const base = persona('meera');
+  const raised = persona('meera');
+  raised.assumptionOverrides = { healthCoverIncomeMultiple: 1.5 };
+
+  const protectionOf = (p: UserProfile) => {
+    const pillar = buildSnapshot(p, FIXED_NOW).wellness.pillars.find((x) => x.name === 'Protection');
+    assert.ok(pillar);
+    return pillar.score;
+  };
+
+  assert.ok(
+    protectionOf(raised) < protectionOf(base),
+    'demanding more cover for the same policy must lower the protection score',
+  );
+});
+
 test('a user-edited health-cover assumption re-scores the gap', () => {
   const profile = persona('rohan');
   const base = buildSnapshot(profile, FIXED_NOW).actions.find(
