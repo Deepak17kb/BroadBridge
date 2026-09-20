@@ -165,3 +165,96 @@ Condition:
 - `scripts/` is empty. T17 decides: populate or delete.
 - `git config user.email` here is `piyushpriyanshu72@gmail.com`, which is not the
   address this session is signed in with. Commits are authored with the former.
+
+---
+
+## T2 — Health cover rule  [done]
+
+**Files touched**
+- `packages/shared/src/types.ts` — 5 new fields on `MarketAssumptions` (additive)
+- `packages/shared/src/assumptions.ts` — the values, `HEALTH_COVER_AGE_BANDS`,
+  `healthCoverFloorForAge()`, `healthCoverTarget()`
+- `packages/shared/src/finance/actions.ts` — rule `close-health-cover-gap`, pushed
+  immediately after `close-life-cover-gap`. Rule count 14 → 15.
+- `packages/shared/test/engine.test.ts` — 6 new tests
+- `packages/web/src/pages/Assumptions.tsx` — a **Protection** card: 5 sliders, the
+  age bands stated, and a live "cover this plan implies for you" vs "held today"
+- `packages/web/src/pages/Actions.tsx` — "from 15 rule checks", plus a paragraph in
+  the published ranking explanation covering the protection ordering
+- `README.md`, `docs/ARCHITECTURE.md`, `docs/DEMO_SCRIPT.md` — Thirteen → Fifteen;
+  ARCHITECTURE gains the need model and why it takes the higher of two rules
+
+**The model**
+```
+target = max(annualIncome × healthCoverIncomeMultiple, floorForAgeBand(age))
+         + dependents × healthCoverPerDependent
+gap    = target − healthInsuranceCover        (no action when gap ≤ 0)
+```
+House view: `0.5×` income; floors 5L / 10L / 15L at age bands `<40`, `40–55`, `>55`;
+3L per dependent. All five are editable per profile via `assumptionOverrides`.
+
+Against the shipped personas:
+
+| Persona | Age / dep / held | Target | Gap | Priority |
+|---|---|---|---|---|
+| Aarav | 26 / 0 / 5L | 5.70L | 0.70L | 66.5 |
+| Meera | 38 / 2 / 10L | 19.68L | 9.68L | 70.4 |
+| Rohan | 52 / 1 / 20L | 26.10L | 6.10L | 68.1 |
+| Meera, zero cover | 38 / 2 / 0 | 19.68L | 19.68L | 74.9 (urgent) |
+
+**Decisions I made without asking**
+- **Flat scalars on `MarketAssumptions`, not a nested `healthCover` object.** The
+  ledger's override machinery (`assumptionOverrides`, `isOverridden`,
+  `resolveAssumptions`) is a shallow merge keyed by `keyof MarketAssumptions`. A
+  nested object would be replaced wholesale by a single slider edit.
+- **Age-band boundaries (40, 55) are structural, not per-profile tunables.** The
+  amounts are what a user has an opinion about and those are editable; moving a
+  boundary changes the shape of the model rather than its calibration. They are
+  exported as `HEALTH_COVER_AGE_BANDS` and printed in the ledger so nothing is hidden.
+- **The rule fires on any gap > 0**, exactly as the brief specifies — no materiality
+  threshold. This is why Aarav gets a low-priority 70k action rather than nothing;
+  a 5L floater on 11.4L of income is genuinely thin, and it ranks 66.5 so it sits
+  near the bottom of his list where it belongs.
+- **Urgency weights re-tuned mid-task after a failing test.** The first cut used
+  `68 + severity×6 + dependents×1.5 + 3` clamped to 77, which made "no cover, two
+  dependents" and "no cover, none" score *identically* at the ceiling — the
+  dependent signal existed in the arithmetic and never reached the user. Now
+  `66 + severity×4 + min(dependents,3)×1.2 + 2.5`, whose joint maximum is 76.1,
+  still strictly under the life-cover rule's 78. The test that caught it is kept.
+- **Impact is the gap; the emergency-fund knock-on is carried in `why`, the
+  assumptions and `evidence`.** `NextBestAction.impact` is a single metric, and
+  splitting a protection gap across two headline numbers would overstate it.
+
+**Tests added (6)** — real output, `npm test`:
+```
+ℹ tests 52   ℹ pass 52   ℹ fail 0      (shared — was 46)
+ℹ tests 42   ℹ pass 42   ℹ fail 0      (server)
+ℹ tests 29   ℹ pass 29   ℹ fail 0      (web)
+$ npm run lint       → LINT_EXIT=0
+$ npm run typecheck  → TYPECHECK_EXIT=0
+```
+Total 117 → **123**. The new ones: correct gap for the under-insured persona and
+the emergency-fund knock-on; adequately covered profile produces nothing; zero
+cover with dependents ranks urgent and outranks both partial cover and the same
+profile without dependents; health ranks immediately below life within protection
+for every persona where both fire; the `max(income, floor)` model including both
+band boundaries and the dependent loading; and a ledger override widening the gap.
+
+**Anything I deliberately left out**
+- `docs/API.md` is unchanged — T2 adds no endpoint or payload field. The action
+  reaches clients through the existing `snapshot.actions` and the existing
+  `get_next_best_actions` tool, both already documented.
+- The **Protection wellness pillar still scores life cover only**. Wiring health
+  cover into `scoreWellness` would change every persona's headline score and is
+  not what T2 asked for.
+
+**Noted, not touched** (constraint 8)
+- **The published ranking copy overstates the waterfall, and did so before this
+  task.** The Actions page says "protection and expensive debt outrank optimisation
+  even when the optimisation shows a larger number". For Meera the real order is
+  `fund-goal-g2` 87.1, `align-allocation` 81.8, `fund-goal-g1` 81.8, then life cover
+  78 — so goals and an investing rule already outrank protection. The scores blend
+  waterfall position with impact and urgency rather than enforcing strict bands. My
+  added paragraph is written to be true as scored; the pre-existing sentence is not
+  mine to rewrite. Worth a decision in T17: either enforce banded scores or correct
+  the copy.

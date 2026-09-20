@@ -124,7 +124,7 @@ export function Actions() {
 
       <div className="grid grid-4">
         <Card>
-          <Stat label="Actions identified" value={snapshot.actions.length} meta="from 13 rule checks" />
+          <Stat label="Actions identified" value={snapshot.actions.length} meta="from 15 rule checks" />
         </Card>
         <Card>
           <Stat
@@ -272,6 +272,13 @@ export function Actions() {
           emergency fund is worth more than a rupee of expected return when there is no buffer at
           all, so protection and expensive debt outrank optimisation even when the optimisation shows
           a larger number.
+        </p>
+        <p className="text-sm text-muted">
+          Within protection, life cover always ranks above health cover — a death with dependents and
+          no cover is unrecoverable, where a medical event is survivable but expensive. Health cover
+          then scales with how large the gap is, how many dependents it has to stretch across, and
+          whether there is any cover at all: no cover with dependents is urgent, a small top-up on an
+          adequate policy is not.
         </p>
       </Card>
     </div>

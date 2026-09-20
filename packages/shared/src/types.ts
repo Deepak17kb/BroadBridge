@@ -149,6 +149,28 @@ export interface MarketAssumptions {
   safeWithdrawalRatePct: number;
   /** Months of expenses considered a complete emergency fund. */
   emergencyFundMonths: number;
+
+  /*
+   * Health-cover need model.
+   *
+   * Separate constants rather than one blended rule because the two drivers are
+   * genuinely different: cover scales with income (a larger household spends
+   * more on treatment and loses more when earnings stop), but it also has an
+   * age-dependent floor, since the cost of a single hospital stay does not fall
+   * just because the patient earns little. The target is the higher of the two,
+   * then raised per dependent. All five are editable in the Assumptions ledger.
+   */
+
+  /** Target cover as a multiple of annual income. */
+  healthCoverIncomeMultiple: number;
+  /** Absolute floor below age `HEALTH_COVER_AGE_BANDS.youngMaxAge`. */
+  healthCoverFloorUnder40: number;
+  /** Absolute floor between the two age-band boundaries. */
+  healthCoverFloor40To55: number;
+  /** Absolute floor above `HEALTH_COVER_AGE_BANDS.midMaxAge`. */
+  healthCoverFloorOver55: number;
+  /** Added to the target for each dependent. */
+  healthCoverPerDependent: number;
 }
 
 export type AllocationWeights = Record<AssetClass, number>;

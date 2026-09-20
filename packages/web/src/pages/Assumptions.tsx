@@ -3,8 +3,10 @@ import {
   ASSET_CLASSES,
   ASSET_LABELS,
   DEFAULT_ASSUMPTIONS,
+  HEALTH_COVER_AGE_BANDS,
   formatCompact,
   formatPercent,
+  healthCoverTarget,
   type AssetClass,
 } from '@wealth/shared';
 import { api } from '../lib/api';
@@ -45,6 +47,16 @@ export function Assumptions() {
     profile.assumptionOverrides?.[key] !== undefined;
 
   const anyOverride = Object.keys(profile.assumptionOverrides ?? {}).length > 0;
+
+  // Same call the rule engine makes, so the ledger and the action can never
+  // quote different targets.
+  const healthTarget = healthCoverTarget({
+    annualIncome: snapshot.cashflow.monthlyIncome * 12,
+    age: profile.age,
+    dependents: profile.dependents,
+    assumptions,
+  });
+  const healthGap = healthTarget - (profile.healthInsuranceCover ?? 0);
 
   return (
     <div className="stack">
@@ -199,6 +211,99 @@ export function Assumptions() {
           </div>
         </Card>
       </div>
+
+      <Card
+        title="Protection"
+        subtitle="What the plan assumes you are insured for, before it assumes anything about returns"
+      >
+        <p className="text-sm text-muted">
+          Health cover is sized as the higher of a multiple of your income and an absolute floor for
+          your age, then raised for each dependent. The two exist for different reasons: income alone
+          under-insures a young earner, whose first serious admission costs the same as anyone
+          else&apos;s, while a floor alone under-insures a high earner, whose household loses far more
+          when treatment interrupts it. Age bands step at{' '}
+          <span className="num">{HEALTH_COVER_AGE_BANDS.youngMaxAge}</span> and{' '}
+          <span className="num">{HEALTH_COVER_AGE_BANDS.midMaxAge}</span>.
+        </p>
+        <div className="grid grid-2" style={{ marginTop: 12 }}>
+          <div className="stack">
+            <Slider
+              label={`Cover as a multiple of income ${isOverridden('healthCoverIncomeMultiple') ? '(yours)' : '(house view)'}`}
+              value={assumptions.healthCoverIncomeMultiple}
+              min={0}
+              max={2}
+              step={0.05}
+              onChange={(v) => setAssumption((a) => void (a.healthCoverIncomeMultiple = v))}
+              format={(v) => `${v.toFixed(2)}x`}
+              hint={`House view ${DEFAULT_ASSUMPTIONS.healthCoverIncomeMultiple}x annual income.`}
+            />
+            <Slider
+              label={`Added per dependent ${isOverridden('healthCoverPerDependent') ? '(yours)' : '(house view)'}`}
+              value={assumptions.healthCoverPerDependent}
+              min={0}
+              max={1_000_000}
+              step={50_000}
+              onChange={(v) => setAssumption((a) => void (a.healthCoverPerDependent = v))}
+              format={(v) => formatCompact(v, currency)}
+              hint="Loaded on top of whichever of the two rules binds."
+            />
+          </div>
+          <div className="stack">
+            <Slider
+              label={`Floor under ${HEALTH_COVER_AGE_BANDS.youngMaxAge} ${isOverridden('healthCoverFloorUnder40') ? '(yours)' : '(house view)'}`}
+              value={assumptions.healthCoverFloorUnder40}
+              min={0}
+              max={5_000_000}
+              step={100_000}
+              onChange={(v) => setAssumption((a) => void (a.healthCoverFloorUnder40 = v))}
+              format={(v) => formatCompact(v, currency)}
+            />
+            <Slider
+              label={`Floor ${HEALTH_COVER_AGE_BANDS.youngMaxAge}–${HEALTH_COVER_AGE_BANDS.midMaxAge} ${isOverridden('healthCoverFloor40To55') ? '(yours)' : '(house view)'}`}
+              value={assumptions.healthCoverFloor40To55}
+              min={0}
+              max={5_000_000}
+              step={100_000}
+              onChange={(v) => setAssumption((a) => void (a.healthCoverFloor40To55 = v))}
+              format={(v) => formatCompact(v, currency)}
+            />
+            <Slider
+              label={`Floor over ${HEALTH_COVER_AGE_BANDS.midMaxAge} ${isOverridden('healthCoverFloorOver55') ? '(yours)' : '(house view)'}`}
+              value={assumptions.healthCoverFloorOver55}
+              min={0}
+              max={5_000_000}
+              step={100_000}
+              onChange={(v) => setAssumption((a) => void (a.healthCoverFloorOver55 = v))}
+              format={(v) => formatCompact(v, currency)}
+            />
+          </div>
+        </div>
+
+        <div className="divider" style={{ margin: '16px 0' }} />
+
+        <div className="stack-sm">
+          <div className="row-between text-sm">
+            <span className="text-muted">Health cover this plan implies for you</span>
+            <span className="num strong">{formatCompact(healthTarget, currency)}</span>
+          </div>
+          <div className="row-between text-sm">
+            <span className="text-muted">Held today</span>
+            <span className="num">{formatCompact(profile.healthInsuranceCover ?? 0, currency)}</span>
+          </div>
+          {healthGap > 0 ? (
+            <p className="text-xs text-subtle" style={{ marginTop: 4 }}>
+              A {formatCompact(healthGap, currency)} gap is not only an insurance question: an
+              uncovered event is paid out of savings, so while it is open the emergency fund is
+              effectively carrying it too.
+            </p>
+          ) : (
+            <p className="text-xs text-subtle" style={{ marginTop: 4 }}>
+              Cover is at or above the target these figures imply, so no health-cover action appears
+              in your list.
+            </p>
+          )}
+        </div>
+      </Card>
 
       <Card
         title="Volatility and correlation"

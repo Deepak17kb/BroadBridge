@@ -1,6 +1,11 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { DEFAULT_ASSUMPTIONS, MODEL_PORTFOLIOS } from '../src/assumptions.js';
+import {
+  DEFAULT_ASSUMPTIONS,
+  HEALTH_COVER_AGE_BANDS,
+  MODEL_PORTFOLIOS,
+  healthCoverTarget,
+} from '../src/assumptions.js';
 import { PERSONAS, personaById } from '../src/data/personas.js';
 import { buildSnapshot, runScenario, SCENARIO_PRESETS } from '../src/finance/engine.js';
 import { projectGoal } from '../src/finance/goals.js';
@@ -347,6 +352,175 @@ test('the persona with 42% card debt is told to clear it first', () => {
   const debtIdx = snapshot.actions.findIndex((a) => a.id === 'clear-expensive-debt');
   const investIdx = snapshot.actions.findIndex((a) => a.category === 'investing');
   if (investIdx >= 0) assert.ok(debtIdx < investIdx);
+});
+
+/* -------------------------------------------------------------------------- */
+/* Health cover                                                                */
+/* -------------------------------------------------------------------------- */
+
+test('the under-insured persona is told to raise health cover, by the right amount', () => {
+  const profile = persona('meera');
+  const snapshot = buildSnapshot(profile, FIXED_NOW);
+  const action = snapshot.actions.find((a) => a.id === 'close-health-cover-gap');
+  assert.ok(action, 'Meera holds 10L against two dependents and 27L of income');
+
+  const annualIncome =
+    (profile.cashflow.monthlyNetIncome + profile.cashflow.otherMonthlyIncome) * 12;
+  const expectedTarget = healthCoverTarget({
+    annualIncome,
+    age: profile.age,
+    dependents: profile.dependents,
+    assumptions: DEFAULT_ASSUMPTIONS,
+  });
+  const expectedGap = expectedTarget - (profile.healthInsuranceCover ?? 0);
+
+  assert.equal(action.evidence?.['health cover needed'], expectedTarget);
+  assert.equal(action.evidence?.['health cover gap'], expectedGap);
+  assert.equal(action.impact.value, Math.round(expectedGap));
+  assert.equal(action.category, 'protection');
+
+  // The knock-on the rule exists to surface: an uncovered event is paid out of
+  // the emergency fund, so the buffer the plan assumes is not actually enough.
+  assert.equal(
+    action.evidence?.['emergency fund target if uninsured'],
+    snapshot.cashflow.emergencyFundTarget + expectedGap,
+  );
+});
+
+test('an adequately covered profile gets no health-cover action', () => {
+  const profile = persona('meera');
+  const annualIncome =
+    (profile.cashflow.monthlyNetIncome + profile.cashflow.otherMonthlyIncome) * 12;
+  profile.healthInsuranceCover = healthCoverTarget({
+    annualIncome,
+    age: profile.age,
+    dependents: profile.dependents,
+    assumptions: DEFAULT_ASSUMPTIONS,
+  });
+
+  const snapshot = buildSnapshot(profile, FIXED_NOW);
+  assert.ok(
+    !snapshot.actions.some((a) => a.id === 'close-health-cover-gap'),
+    'cover exactly at target leaves no gap, so no action',
+  );
+});
+
+test('zero health cover with dependents ranks urgent', () => {
+  const uninsured = persona('meera');
+  uninsured.healthInsuranceCover = 0;
+  const uninsuredAction = buildSnapshot(uninsured, FIXED_NOW).actions.find(
+    (a) => a.id === 'close-health-cover-gap',
+  );
+  assert.ok(uninsuredAction);
+  // 70 is the threshold the shell badge and the Actions page call "urgent".
+  assert.ok(
+    uninsuredAction.priorityScore >= 70,
+    `expected urgent, got ${uninsuredAction.priorityScore}`,
+  );
+  assert.match(uninsuredAction.title, /you have none/);
+
+  const partial = persona('meera');
+  const partialAction = buildSnapshot(partial, FIXED_NOW).actions.find(
+    (a) => a.id === 'close-health-cover-gap',
+  );
+  assert.ok(partialAction);
+  assert.ok(
+    uninsuredAction.priorityScore > partialAction.priorityScore,
+    'no cover at all must outrank partial cover',
+  );
+
+  // Urgency also has to move with dependents, holding cover constant.
+  const noDependents = persona('meera');
+  noDependents.healthInsuranceCover = 0;
+  noDependents.dependents = 0;
+  const noDepAction = buildSnapshot(noDependents, FIXED_NOW).actions.find(
+    (a) => a.id === 'close-health-cover-gap',
+  );
+  assert.ok(noDepAction);
+  assert.ok(
+    uninsuredAction.priorityScore > noDepAction.priorityScore,
+    'two dependents must outrank none at the same cover level',
+  );
+});
+
+test('health cover sits immediately below life cover in the protection waterfall', () => {
+  for (const p of PERSONAS) {
+    const actions = buildSnapshot(p.profile, FIXED_NOW).actions;
+    const life = actions.find((a) => a.id === 'close-life-cover-gap');
+    const health = actions.find((a) => a.id === 'close-health-cover-gap');
+    if (!life || !health) continue;
+
+    assert.ok(
+      health.priorityScore < life.priorityScore,
+      `${p.id}: a death with dependents and no cover is unrecoverable; a medical event is not`,
+    );
+
+    // Among protection actions specifically, nothing may come between them.
+    const protection = actions.filter((a) => a.category === 'protection');
+    const lifeIdx = protection.findIndex((a) => a.id === 'close-life-cover-gap');
+    const healthIdx = protection.findIndex((a) => a.id === 'close-health-cover-gap');
+    assert.equal(healthIdx, lifeIdx + 1, `${p.id}: health cover ranks immediately after life cover`);
+  }
+});
+
+test('the health-cover target is the higher of the income rule and the age floor', () => {
+  // Low earner, young: the floor binds, because one admission costs what it costs.
+  const lowIncomeYoung = healthCoverTarget({
+    annualIncome: 200_000,
+    age: 26,
+    dependents: 0,
+    assumptions: DEFAULT_ASSUMPTIONS,
+  });
+  assert.equal(lowIncomeYoung, DEFAULT_ASSUMPTIONS.healthCoverFloorUnder40);
+
+  // High earner: the income multiple binds instead.
+  const highIncome = healthCoverTarget({
+    annualIncome: 10_000_000,
+    age: 26,
+    dependents: 0,
+    assumptions: DEFAULT_ASSUMPTIONS,
+  });
+  assert.equal(highIncome, 10_000_000 * DEFAULT_ASSUMPTIONS.healthCoverIncomeMultiple);
+
+  // The floor steps up with age at the published band boundaries.
+  const floorArgs = { annualIncome: 0, dependents: 0, assumptions: DEFAULT_ASSUMPTIONS };
+  assert.equal(
+    healthCoverTarget({ ...floorArgs, age: HEALTH_COVER_AGE_BANDS.youngMaxAge - 1 }),
+    DEFAULT_ASSUMPTIONS.healthCoverFloorUnder40,
+  );
+  assert.equal(
+    healthCoverTarget({ ...floorArgs, age: HEALTH_COVER_AGE_BANDS.youngMaxAge }),
+    DEFAULT_ASSUMPTIONS.healthCoverFloor40To55,
+  );
+  assert.equal(
+    healthCoverTarget({ ...floorArgs, age: HEALTH_COVER_AGE_BANDS.midMaxAge }),
+    DEFAULT_ASSUMPTIONS.healthCoverFloorOver55,
+  );
+
+  // Dependents load on top of whichever of the two binds.
+  assert.equal(
+    healthCoverTarget({ ...floorArgs, age: 26, dependents: 2 }),
+    DEFAULT_ASSUMPTIONS.healthCoverFloorUnder40 + 2 * DEFAULT_ASSUMPTIONS.healthCoverPerDependent,
+  );
+});
+
+test('a user-edited health-cover assumption re-scores the gap', () => {
+  const profile = persona('rohan');
+  const base = buildSnapshot(profile, FIXED_NOW).actions.find(
+    (a) => a.id === 'close-health-cover-gap',
+  );
+  assert.ok(base);
+
+  // Every constant in the model is the user's to change, like the rest of the ledger.
+  profile.assumptionOverrides = { healthCoverIncomeMultiple: 1 };
+  const raised = buildSnapshot(profile, FIXED_NOW).actions.find(
+    (a) => a.id === 'close-health-cover-gap',
+  );
+  assert.ok(raised);
+  assert.ok(
+    (raised.evidence?.['health cover gap'] ?? 0) > (base.evidence?.['health cover gap'] ?? 0),
+    'doubling the income multiple must widen the gap',
+  );
 });
 
 test('education inflation override is respected', () => {

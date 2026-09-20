@@ -61,7 +61,56 @@ export const DEFAULT_ASSUMPTIONS: MarketAssumptions = {
   },
   safeWithdrawalRatePct: 0.035,
   emergencyFundMonths: 6,
+  healthCoverIncomeMultiple: 0.5,
+  healthCoverFloorUnder40: 500_000,
+  healthCoverFloor40To55: 1_000_000,
+  healthCoverFloorOver55: 1_500_000,
+  healthCoverPerDependent: 300_000,
 };
+
+/**
+ * Age boundaries for the health-cover floor.
+ *
+ * Structural rather than a per-profile tunable: the *amounts* are what a user
+ * has an opinion about and those are editable, but moving the boundary between
+ * bands changes the shape of the model rather than its calibration. Exported so
+ * the Assumptions ledger can state the bands it is applying instead of leaving
+ * the reader to infer them from three unexplained numbers.
+ */
+export const HEALTH_COVER_AGE_BANDS = { youngMaxAge: 40, midMaxAge: 55 } as const;
+
+/**
+ * The absolute cover floor for an age, before income and dependents are
+ * considered. Treatment costs rise with age while insurability falls, so the
+ * floor steps up rather than scaling smoothly.
+ */
+export function healthCoverFloorForAge(age: number, assumptions: MarketAssumptions): number {
+  if (age < HEALTH_COVER_AGE_BANDS.youngMaxAge) return assumptions.healthCoverFloorUnder40;
+  if (age < HEALTH_COVER_AGE_BANDS.midMaxAge) return assumptions.healthCoverFloor40To55;
+  return assumptions.healthCoverFloorOver55;
+}
+
+/**
+ * Health cover this profile should be carrying.
+ *
+ *   target = max(annual income x multiple, floor for age) + per-dependent loading
+ *
+ * The max is the point of the model: income alone under-insures a young earner
+ * whose first serious admission costs the same as anyone else's, and the floor
+ * alone under-insures a high earner whose household spends far more when
+ * treatment interrupts it.
+ */
+export function healthCoverTarget(input: {
+  annualIncome: number;
+  age: number;
+  dependents: number;
+  assumptions: MarketAssumptions;
+}): number {
+  const { annualIncome, age, dependents, assumptions } = input;
+  const incomeBased = Math.max(0, annualIncome) * assumptions.healthCoverIncomeMultiple;
+  const floor = healthCoverFloorForAge(age, assumptions);
+  return Math.max(incomeBased, floor) + Math.max(0, dependents) * assumptions.healthCoverPerDependent;
+}
 
 /** Model portfolios, one per risk bucket. Weights sum to 1. */
 export const MODEL_PORTFOLIOS: Record<RiskBucket, AllocationWeights> = {

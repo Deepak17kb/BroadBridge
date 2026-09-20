@@ -1,4 +1,9 @@
-import { ASSET_LABELS } from '../assumptions.js';
+import {
+  ASSET_LABELS,
+  HEALTH_COVER_AGE_BANDS,
+  healthCoverFloorForAge,
+  healthCoverTarget,
+} from '../assumptions.js';
 import type {
   AllocationWeights,
   CashflowSummary,
@@ -230,6 +235,129 @@ export function generateActions(ctx: ActionContext): NextBestAction[] {
         'life cover held': lifeCover,
         'life cover gap': lifeNeed - lifeCover,
         'annual income': annualIncome,
+      },
+    });
+  }
+
+  /*
+   * 3b. Health cover. ---------------------------------------------------------
+   *
+   * Immediately after life cover, and for the same reason: an uninsured medical
+   * event is the fastest way a funded plan stops being one. It ranks below life
+   * cover because a death with dependents and no cover is unrecoverable, where
+   * a medical event is survivable but expensive - and it ranks above every goal
+   * and optimisation rule because the money it protects is the emergency fund
+   * those rules quietly assume is there.
+   */
+  const healthCoverTargetAmount = healthCoverTarget({
+    annualIncome,
+    age: profile.age,
+    dependents: profile.dependents,
+    assumptions,
+  });
+  const healthCover = profile.healthInsuranceCover ?? 0;
+  const healthGap = healthCoverTargetAmount - healthCover;
+  if (healthGap > 0) {
+    const ageFloor = healthCoverFloorForAge(profile.age, assumptions);
+    const dependentLoading = profile.dependents * assumptions.healthCoverPerDependent;
+    /*
+     * The knock-on nobody prices in: an uncovered admission is paid out of the
+     * emergency fund, so the buffer that rule 2 sized against job loss has to
+     * absorb a medical bill as well. Stating the implied target is what turns
+     * "you are under-insured" into a number the user can act on.
+     */
+    const emergencyTargetIfUninsured = cashflow.emergencyFundTarget + healthGap;
+    const monthsOfExpensesExposed =
+      cashflow.monthlyExpenses > 0 ? healthGap / cashflow.monthlyExpenses : 0;
+
+    /*
+     * Urgency has three drivers and the weights are chosen so none of them can
+     * be masked: at their joint maximum (a total gap, three or more dependents,
+     * no cover at all) the score reaches 76.1, still under the life-cover rule's
+     * 78. An earlier cut used wider weights and a clamp, which made "no cover,
+     * two dependents" and "no cover, none" score identically at the ceiling -
+     * the dependent signal existed in the arithmetic and never reached the user.
+     */
+    const severity = clamp(healthGap / healthCoverTargetAmount, 0, 1);
+    const dependentUrgency = Math.min(profile.dependents, 3) * 1.2;
+    const uninsuredUrgency = healthCover <= 0 ? 2.5 : 0;
+
+    actions.push({
+      id: 'close-health-cover-gap',
+      title:
+        healthCover <= 0
+          ? `Take out health cover of ${fmt(healthCoverTargetAmount)} - you have none`
+          : `Raise health cover by ${fmt(healthGap)}`,
+      category: 'protection',
+      why: `${
+        healthCover <= 0
+          ? 'You hold no health cover at all.'
+          : `You hold ${fmt(healthCover)} of health cover.`
+      } At ${profile.age} with ${fmt(annualIncome)} of annual income${
+        profile.dependents > 0 ? ` and ${profile.dependents} dependent(s)` : ''
+      }, the model puts the target at ${fmt(healthCoverTargetAmount)}, leaving ${fmt(healthGap)} you would have to find yourself. That is ${monthsOfExpensesExposed.toFixed(1)} months of your expenses, and it would come out of the emergency fund - which is why an uninsured household effectively needs ${fmt(emergencyTargetIfUninsured)} in reserve rather than ${fmt(cashflow.emergencyFundTarget)}.`,
+      impact: {
+        metric: 'Out-of-pocket exposure removed',
+        value: round(healthGap, 0),
+        unit: currencyUnit,
+      },
+      effort: 'low',
+      // Bounded below the life-cover rule's 78 so the protection waterfall holds.
+      priorityScore: round(
+        clamp(66 + severity * 4 + dependentUrgency + uninsuredUrgency, 66, 77),
+        1,
+      ),
+      steps: [
+        healthCover <= 0
+          ? `Get quotes for a ${fmt(healthCoverTargetAmount)} family floater before anything else in this list below it.`
+          : `Add ${fmt(healthGap)} of cover - a top-up or super top-up over your existing ${fmt(healthCover)} is usually far cheaper than replacing the base policy.`,
+        'Check what your employer policy actually covers. It typically ends with the job, which is exactly when you can least afford to replace it.',
+        'Read the sub-limits, not the headline number: room-rent caps, co-pay and disease-specific limits decide what a claim really pays.',
+        'Disclose pre-existing conditions fully. A contested claim is the same as no cover.',
+        ...(profile.dependents > 0
+          ? ['Cover dependents on the same floater rather than separate small policies - one larger pool absorbs a bad year better.']
+          : []),
+      ],
+      assumptions: [
+        {
+          label: 'Cover rule',
+          value: `The higher of ${assumptions.healthCoverIncomeMultiple}x annual income (${fmt(annualIncome * assumptions.healthCoverIncomeMultiple)}) and the age ${profile.age} floor (${fmt(ageFloor)})`,
+          source: 'market_assumption',
+        },
+        {
+          label: 'Age bands',
+          value: `Floors step up under ${HEALTH_COVER_AGE_BANDS.youngMaxAge}, ${HEALTH_COVER_AGE_BANDS.youngMaxAge}-${HEALTH_COVER_AGE_BANDS.midMaxAge} and above ${HEALTH_COVER_AGE_BANDS.midMaxAge}`,
+          source: 'model_default',
+        },
+        {
+          label: 'Dependent loading',
+          value: `${fmt(assumptions.healthCoverPerDependent)} per dependent x ${profile.dependents} = ${fmt(dependentLoading)}`,
+          source: 'market_assumption',
+        },
+        { label: 'Existing cover', value: fmt(healthCover), source: 'user_input' },
+        {
+          label: 'Knock-on effect',
+          value: `An uncovered event is paid from savings, so the emergency-fund target rises from ${fmt(cashflow.emergencyFundTarget)} to ${fmt(emergencyTargetIfUninsured)} while the gap is open`,
+          source: 'derived',
+        },
+        {
+          label: 'Not modelled',
+          value:
+            'Premium cost, employer group cover, waiting periods on pre-existing conditions, room-rent caps, co-pay and disease sub-limits',
+          source: 'model_default',
+        },
+      ],
+      evidence: {
+        'health cover needed': healthCoverTargetAmount,
+        'health cover held': healthCover,
+        'health cover gap': healthGap,
+        'health cover age floor': ageFloor,
+        'health cover income component': annualIncome * assumptions.healthCoverIncomeMultiple,
+        'health cover dependent loading': dependentLoading,
+        'annual income': annualIncome,
+        'months of expenses exposed': monthsOfExpensesExposed,
+        'emergency fund target': cashflow.emergencyFundTarget,
+        'emergency fund target if uninsured': emergencyTargetIfUninsured,
       },
     });
   }

@@ -46,7 +46,7 @@ Scroll to **Goal funding**.
 
 Click **Next Best Actions**.
 
-> "Thirteen rule checks, ranked by impact against effort — but ordered by the planning waterfall, not by raw impact. Protection, then expensive debt, then goals, then optimisation."
+> "Fifteen rule checks, ranked by impact against effort — but ordered by the planning waterfall, not by raw impact. Protection, then expensive debt, then goals, then optimisation."
 
 Expand the top action.
 

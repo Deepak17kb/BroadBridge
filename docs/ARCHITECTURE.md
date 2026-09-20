@@ -99,7 +99,7 @@ Pure functions over plain data. No classes, no I/O, no framework — which is wh
 | `finance/goals.ts` | Goal projection with per-goal inflation and return |
 | `finance/montecarlo.ts` | Geometric Brownian Motion with variance-drag correction |
 | `finance/cashflow.ts` | Cashflow, net worth, retirement sizing with drawdown, debt payoff, wellness score |
-| `finance/actions.ts` | Thirteen-rule recommendation engine |
+| `finance/actions.ts` | Fifteen-rule recommendation engine |
 | `finance/engine.ts` | Composition: `buildSnapshot` and `runScenario` |
 
 ### Four choices that matter
@@ -109,6 +109,8 @@ Pure functions over plain data. No classes, no I/O, no framework — which is wh
 **Variance drag in the Monte Carlo.** Monthly log-returns are drawn as `N(ln(1+μ)/12 − σ²/24, σ/√12)`. Omitting the `−σ²/2` term is the most common bug in retirement simulators: it silently inflates the median outcome by several percent a year. A test asserts the simulated median tracks the closed-form projection.
 
 **Exact solvers, not search.** Future value is linear in the contribution, so the required contribution is computed directly rather than by iterating. The required *return* is genuinely non-linear, so that one bisects — and returns `null` when no return in a sane range would close the gap, instead of reporting an absurd number.
+
+**Protection is sized on two rules, not one.** Health cover is `max(annual income × multiple, floor for age band) + per-dependent loading`. Income alone under-insures a young earner, whose first serious admission costs what it costs regardless of salary; a floor alone under-insures a high earner, whose household loses far more when treatment interrupts it. Taking the higher of the two is the whole point. All five constants live in `assumptions.ts` and are editable in the ledger, and the rule reports the knock-on nobody prices in — an uncovered event is paid out of savings, so while the gap is open the emergency-fund target is effectively `target + gap`. Life cover ranks above health cover inside the protection block, bounded so it always does.
 
 **Everything seeded.** `mulberry32` plus Box-Muller, with the seed carried in the result. The same inputs always produce the same fan chart, so a recommendation citing a success probability can be re-derived exactly. Without this, "82% chance" is unauditable.
 
