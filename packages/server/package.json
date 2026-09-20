@@ -1,0 +1,30 @@
+{
+  "name": "@wealth/server",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "main": "dist/index.js",
+  "scripts": {
+    "dev": "tsx watch src/index.ts",
+    "start": "node dist/index.js",
+    "build": "tsup",
+    "test": "node --import tsx --test test/api.test.ts test/agent.test.ts",
+    "typecheck": "tsc --noEmit -p ."
+  },
+  "dependencies": {
+    "@anthropic-ai/bedrock-sdk": "^0.33.7",
+    "@anthropic-ai/sdk": "^0.127.0",
+    "@aws-sdk/client-dynamodb": "^3.703.0",
+    "@aws-sdk/lib-dynamodb": "^3.703.0",
+    "@wealth/shared": "*",
+    "cors": "^2.8.5",
+    "express": "^4.21.2",
+    "serverless-http": "^3.2.0",
+    "zod": "^3.24.1"
+  },
+  "devDependencies": {
+    "@types/cors": "^2.8.17",
+    "@types/express": "^4.17.21",
+    "tsup": "^8.3.5"
+  }
+}

@@ -1,0 +1,41 @@
+# Dependencies
+node_modules/
+
+# Build output
+dist/
+build/
+.vite/
+*.tsbuildinfo
+
+# Infrastructure
+cdk.out/
+.cdk.staging/
+infra/cdk-outputs.json
+
+# Environment — never commit credentials
+.env
+.env.*
+!.env.example
+*.local
+
+# Test and tooling output
+coverage/
+playwright-report/
+test-results/
+.playwright/
+npm-debug.log*
+*.log
+
+# Local scratch files (bug.tmp.ts, edge.tmp.ts and friends are bug-hunt probes,
+# not product code — they must never enter the repo or the lint gate)
+*.tmp.ts
+*.tmp.tsx
+*.tmp.js
+
+# Local data
+.data/
+
+# OS
+.DS_Store
+Thumbs.db
+desktop.ini

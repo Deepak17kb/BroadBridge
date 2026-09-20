@@ -1,0 +1,148 @@
+name: Deploy
+
+# Deploys to AWS. Triggered by a push to main (staging) or manually with a
+# chosen stage, and always after CI has passed on the same commit.
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+    inputs:
+      stage:
+        description: Target stage
+        required: true
+        default: staging
+        type: choice
+        options: [dev, staging, prod]
+
+concurrency:
+  # Never two deploys to the same stage at once - CloudFormation would reject
+  # the second one mid-flight and leave the stack in UPDATE_ROLLBACK.
+  group: deploy-${{ github.event.inputs.stage || 'staging' }}
+  cancel-in-progress: false
+
+env:
+  NODE_VERSION: '22'
+  AWS_REGION: ${{ vars.AWS_REGION || 'ap-south-1' }}
+
+permissions:
+  # Required for GitHub's OIDC provider to mint a token AWS will trust. This is
+  # what lets the pipeline assume a role with no long-lived access keys stored
+  # as repository secrets.
+  id-token: write
+  contents: read
+
+jobs:
+  deploy:
+    name: Deploy to ${{ github.event.inputs.stage || 'staging' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    environment: ${{ github.event.inputs.stage || 'staging' }}
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+
+      - run: npm ci
+
+      # The gate is repeated here rather than trusted from the CI run: a manual
+      # dispatch can target any commit, including one CI never saw.
+      - name: Verify before deploying
+        run: npm run typecheck && npm test
+
+      - name: Build
+        run: npm run build
+
+      - name: Assume the deployment role
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ secrets.AWS_DEPLOY_ROLE_ARN }}
+          aws-region: ${{ env.AWS_REGION }}
+          role-session-name: wealth-navigator-deploy-${{ github.run_id }}
+
+      - name: Show the planned changes
+        run: npx cdk diff -c stage=${{ github.event.inputs.stage || 'staging' }}
+        working-directory: infra
+        # A diff against a stack that does not exist yet is an expected failure
+        # on the very first deploy, so it must not block one.
+        continue-on-error: true
+
+      - name: Deploy
+        id: deploy
+        run: |
+          npx cdk deploy \
+            -c stage=${{ github.event.inputs.stage || 'staging' }} \
+            --require-approval never \
+            --outputs-file cdk-outputs.json
+        working-directory: infra
+
+      - name: Publish the deployment summary
+        run: |
+          STAGE="${{ github.event.inputs.stage || 'staging' }}"
+          OUTPUTS="infra/cdk-outputs.json"
+          APP_URL=$(node -e "
+            const o=require('./$OUTPUTS');
+            const s=o['WealthNavigator-$STAGE']||{};
+            console.log(s.AppUrl||'');
+          ")
+          API_URL=$(node -e "
+            const o=require('./$OUTPUTS');
+            const s=o['WealthNavigator-$STAGE']||{};
+            console.log(s.DirectApiUrl||'');
+          ")
+
+          {
+            echo "## Deployed to \`$STAGE\`"
+            echo
+            echo "| | |"
+            echo "|---|---|"
+            echo "| App | $APP_URL |"
+            echo "| API | $API_URL |"
+            echo "| Commit | \`${{ github.sha }}\` |"
+            echo "| Region | ${{ env.AWS_REGION }} |"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+          echo "APP_URL=$APP_URL" >> "$GITHUB_ENV"
+          echo "API_URL=$API_URL" >> "$GITHUB_ENV"
+
+      # A green CloudFormation stack is not a working deployment. This is the
+      # check that would actually catch a broken Lambda bundle or a missing
+      # DynamoDB permission.
+      - name: Post-deploy smoke test
+        run: |
+          set -e
+          echo "Waiting for the API to answer…"
+          for i in $(seq 1 30); do
+            if curl -fsS "${API_URL}api/health" > /dev/null 2>&1; then break; fi
+            sleep 4
+          done
+
+          echo "--- health ---"
+          curl -fsS "${API_URL}api/health" | tee /dev/stderr | grep -q '"status":"ok"'
+
+          echo "--- readiness (confirms DynamoDB is reachable) ---"
+          curl -fsS "${API_URL}api/ready" | tee /dev/stderr | grep -q '"store":"dynamodb"'
+
+          echo "--- a real profile round-trip ---"
+          PROFILE_ID=$(curl -fsS -X POST "${API_URL}api/profiles" \
+            -H 'content-type: application/json' -d '{"personaId":"aarav"}' \
+            | node -e 'let b="";process.stdin.on("data",d=>b+=d).on("end",()=>console.log(JSON.parse(b).profile.id))')
+          curl -fsS "${API_URL}api/profiles/$PROFILE_ID/snapshot" | grep -q '"wellness"'
+          curl -fsS -X DELETE "${API_URL}api/profiles/$PROFILE_ID"
+
+          echo "--- the app itself is being served ---"
+          curl -fsS "$APP_URL" | grep -q 'AI Wealth Navigator'
+
+          echo "Deployment verified."
+
+      - name: Report which reasoning engine is live
+        run: |
+          ENGINE=$(curl -fsS "${API_URL}api/health" | node -e \
+            'let b="";process.stdin.on("data",d=>b+=d).on("end",()=>console.log(JSON.parse(b).engine))')
+          echo "Reasoning engine: $ENGINE" >> "$GITHUB_STEP_SUMMARY"
+          if [ "$ENGINE" = "deterministic" ]; then
+            echo "::warning::The deployed API is running the deterministic engine. Enable Claude model access in Amazon Bedrock for this region to switch to the language model."
+          fi

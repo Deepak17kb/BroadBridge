@@ -1,0 +1,463 @@
+================================================================================
+AI WEALTH NAVIGATOR - FEATURE & FUNCTIONALITY INVENTORY
+Generated 2026-09-20 by reading the source, not the docs.
+Verified state: npm test = 117/117 passing (shared 46, server 42, web 29).
+Size: ~16,700 lines of TypeScript/TSX across 4 workspaces.
+================================================================================
+
+HOW TO READ THIS FILE
+  PART A  - what is built and working today
+  PART B  - what the product deliberately does NOT model (stated in-app)
+  PART C  - gaps, drift and candidate next work, ranked by what it unlocks
+
+================================================================================
+PART A - WHAT EXISTS
+================================================================================
+
+--------------------------------------------------------------------------------
+A1. STACK AND SHAPE
+--------------------------------------------------------------------------------
+  * npm workspaces monorepo: packages/shared, packages/server, packages/web, infra
+  * React 18 + Vite 6 + react-router 6 + recharts (client, port 5173)
+  * Express 4 + Zod + Node 22 (API, port 4000), bundled by tsup
+  * @wealth/shared is imported as TypeScript SOURCE by both browser and server -
+    one financial engine, no second implementation to drift
+  * Runs with zero credentials (deterministic engine); optional Claude via the
+    Anthropic API or AWS Bedrock
+  * AWS CDK stack: CloudFront + S3 + HTTP API + Lambda (ARM64) + DynamoDB + Bedrock
+
+--------------------------------------------------------------------------------
+A2. SCREENS (9 routes)
+--------------------------------------------------------------------------------
+  /            Onboarding (public)         /portfolio    Portfolio + balance sheet
+  /dashboard   Dashboard                   /assistant    AI Assistant
+  /actions     Next Best Actions           /assumptions  Assumptions ledger
+  /goals       Goals                       /profile      My Details
+  /scenarios   Scenario Lab                *             unknown paths -> home
+
+  Route guard: every screen except onboarding requires a loaded profile, enforced
+  once in App.tsx so pages can treat the profile as non-null.
+
+  ONBOARDING
+    - Two entry paths: one-click sample persona, or a 6-screen wizard
+      (Get started / About you / Money in, money out / What you own and owe /
+       Your goals / Your appetite for risk)
+    - Live preview: wellness score and monthly surplus recompute on every
+      keystroke using the shared engine
+    - Collects: name, age, retirement age, dependents, income stability, currency,
+      income + other income, free-form expense categories, liquid savings,
+      holdings (symbol, name, asset class, units, price, cost basis, expense ratio,
+      instrument kind), liabilities (kind, outstanding, rate, EMI), goals
+      (target in today's money, target year, saved, monthly contribution, step-up,
+      priority, inflation override), life + health insurance cover, risk answers
+    - Theme and currency togglable before a profile even exists
+
+  DASHBOARD
+    - Wellness score ring (0-100, grade A-D) over 5 weighted pillars
+    - Headline stats: net worth, monthly surplus, emergency cover, retirement funded
+    - Goal funding chart: needed at goal date vs projected
+    - Expense breakdown bars
+    - Allocation: current vs recommended, expected return, volatility, drift,
+      plus an "allocation as a table" toggle for the chart-averse
+    - Risk profile panel: tolerance vs capacity shown separately
+    - Retirement outlook: years to retirement, corpus required, depletion age
+    - Top-ranked next action inline
+
+  GOALS
+    - Per-goal projection: inflated target, projected corpus, surplus/shortfall,
+      funded ratio, required monthly, monthly gap, required return (or null when
+      no return closes it), on-track flag
+    - Summary stats: goals on track, committed monthly, total shortfall, and the
+      amount needed to fully fund everything
+    - "Test a change" sliders (extra monthly, lump sum) that model live and
+      deliberately DO NOT save - committing is a separate explicit button
+    - Monte Carlo range of outcomes per goal
+    - Inline goal editor (auto-saves): name, cost today, already saved,
+      monthly contribution, target year, priority, step-up, inflation override
+
+  SCENARIO LAB
+    - 7 one-click presets: save 5k more, cut spending 10%, retire 5 years earlier,
+      survive a 35% crash, 12-month career break, 8% inflation, invest a 3L bonus
+    - 9 levers, all optional: extra monthly savings, expense multiplier,
+      retirement age delta, lump sum, market shock % + shock year, career break
+      months, inflation %, income growth %, allocation override
+    - Every drag recomputes IN THE BROWSER via the shared engine; the simulation is
+      debounced and the path count drops while dragging, then rises when it settles
+    - Outputs: corpus at retirement, retirement funded %, success probability,
+      goals on track, Monte Carlo fan (p10/p25/p50/p75/p90), outcome histogram,
+      plain-language explanation, deltas vs baseline
+    - Pin up to 3 scenarios for side-by-side comparison
+
+  PORTFOLIO
+    - Covariance-based volatility (full matrix, not a weighted average of parts)
+    - Expected return, Sharpe ratio, blended expense ratio, unrealised gain
+    - Diversification measured 3 ways: asset-class spread, position breadth,
+      single-security concentration (HHI + effective positions)
+    - Concentration measured on SECURITIES only, not fund or deposit positions
+    - Drift vs target per asset class + exact rebalancing trades (buy/sell amounts)
+    - "The risk ladder": all 5 model portfolios with return/vol, so the
+      recommendation can be compared rather than asserted
+    - Editable holdings and liabilities tables; every edit re-runs the whole plan
+    - Debt payoff: avalanche vs snowball, months to debt-free, interest paid,
+      payoff order, and a separate "unpayable" report for balances whose EMI does
+      not cover their own interest
+
+  NEXT BEST ACTIONS
+    - 14 rule checks, ranked 0-100 by impact x urgency x confidence
+    - Each action carries: why (in the user's own numbers), quantified impact,
+      effort level, ordered steps, the assumptions used, and evidence figures
+    - "Apply to my plan" button that actually mutates the plan, for the 4
+      machine-readable mutation types (increase goal contribution, set emergency
+      fund, rebalance to target, set allocation)
+    - Summary stats: actions identified, quantified upside, low-effort count, urgent
+    - The ranking rule is published on the page
+
+    The 14 checks, in waterfall order:
+      1.  cover-interest-*     debt whose EMI is below its own monthly interest
+      2.  clear-expensive-debt highest-rate debt before any investing
+      3.  build-emergency-fund months of cover vs target
+      4.  close-life-cover-gap life insurance need vs cover held
+      5.  fund-goal-*          per off-track goal, the monthly gap
+      6.  deploy-idle-cash     cash beyond the emergency target
+      7.  align-allocation     current mix vs risk-appropriate mix
+      8.  reduce-concentration single security above threshold
+      9.  rebalance-portfolio  total drift above threshold
+      10. cut-fund-fees        blended expense ratio vs achievable
+      11. enable-step-up       contributions with no annual increase
+      12. close-retirement-gap monthly gap to the retirement corpus
+      13. automate-surplus     unallocated monthly surplus
+      14. use-tax-deduction    remaining tax-deductible investment room
+
+  AI ASSISTANT
+    - Natural-language chat over the user's actual position
+    - Live reasoning trace: plan steps with status, every tool call with timing,
+      retrieved knowledge documents with scores, streamed answer tokens
+    - Grounding panel: every figure in the answer marked grounded or unverified
+    - Capability panel: active engine, tool count, knowledge-base size
+    - Dynamic suggested questions (profile-aware) plus fixed starters
+    - Stop button mid-run
+    - Structured attachments rendered as cards: goal projection, Monte Carlo,
+      scenario, portfolio, actions, allocation, debt plan
+    - Escaping-first mini-Markdown renderer (HTML is escaped before formatting, so
+      model output cannot inject markup)
+    - Explicit banner when running on the deterministic engine
+
+  ASSUMPTIONS
+    - Every assumption editable by the user: inflation, risk-free rate,
+      per-asset-class expected returns and volatility, correlation matrix,
+      safe withdrawal rate, emergency fund months
+    - Changing one re-scores the entire plan live (wellness, retirement funded,
+      expected return and goals on track shown at the top as live feedback)
+    - Lists what the assistant knows (the knowledge base index)
+    - Lists what is deliberately NOT modelled
+
+  MY DETAILS
+    - Full profile editor: about you, income, free-form expense categories
+      (add/remove rows), liquid savings, protection (life + health cover)
+    - Risk questionnaire re-scoreable inline, re-scores the profile immediately
+    - Live plan summary beside the form
+    - Data and privacy section
+
+  SHELL (all screens)
+    - Grouped sidebar nav (Overview / Plan / Intelligence / Settings) with an
+      urgent-action count badge
+    - Reasoning-engine badge: bedrock / anthropic / deterministic, with tooltip
+    - INR <-> USD display currency switch
+    - Dark/light theme toggle, persisted to localStorage
+    - Mobile nav with backdrop; aria labels throughout
+
+--------------------------------------------------------------------------------
+A3. FINANCIAL ENGINE (packages/shared)
+--------------------------------------------------------------------------------
+  math.ts
+    monthlyRate (geometric), annuityFactor, steppedAnnuityFactor (linear in the
+    contribution, which makes the solver exact rather than an iterative search),
+    futureValueLumpSum, requiredMonthlyContribution (closed form),
+    solveRequiredReturn (bisection, returns null past 40%/yr),
+    accumulate (shared by goals and retirement so a crash is modelled identically),
+    createRng (mulberry32, seeded and reproducible), createNormalSampler
+    (Box-Muller), percentile (linear interpolation), monthsToPayoff (Infinity when
+    the payment does not cover interest), emiFor, clamp, sum, round
+
+  portfolio.ts
+    emptyWeights, holdingValue, correlationOf (order-tolerant),
+    portfolioExpectedReturn, portfolioVolatility (full covariance including cross
+    terms, so the negative equity/gold correlation actually lowers total risk),
+    normaliseWeights, weightsFromHoldings, recommendAllocation (glide path:
+    de-risks as the horizon shortens; under 3 years equity is cut hard regardless
+    of appetite), concentrationIndex (HHI), analyzePortfolio
+
+  risk.ts
+    scoreRisk - separate tolerance (behavioural) and capacity (structural) scores,
+    effective score = min(the two), bucket + human-readable drivers
+
+  goals.ts
+    yearsToGoal, projectGoal - reports the gap three ways (monthly top-up,
+    required return, absolute shortfall)
+
+  montecarlo.ts
+    runMonteCarlo - seeded and reproducible; percentile bands per year, success
+    probability, terminal-value histogram, variance-drag correction
+
+  cashflow.ts
+    totalMonthlyExpenses, summariseCashflow (savings rate, EMI load,
+    debt-to-income, emergency cover/target/gap, expense breakdown),
+    summariseNetWorth, assessRetirement (year-by-year drawdown at a de-risked
+    post-retirement return to find the actual depletion age, and it publishes the
+    exact plan inputs so a Monte Carlo simulates the SAME plan),
+    planDebtPayoff (avalanche vs snowball + unpayable debts),
+    scoreWellness (5 published pillars with fixed weights, plus a dataComplete
+    flag so an empty profile is reported as incomplete rather than graded C)
+
+  engine.ts
+    resolveAssumptions (user overrides layered on the house view), planningHorizon,
+    returnForGoal (per-goal return by that goal's own horizon, not one blended
+    number), buildSnapshot (single pass producing everything the dashboard needs),
+    runScenario (absolute outcome + delta vs baseline), describeLevers,
+    SCENARIO_PRESETS
+
+  assumptions.ts
+    6 asset classes, DEFAULT_ASSUMPTIONS (6% inflation, 6.6% risk-free, per-class
+    returns and vols, 15 correlation pairs, 3.5% SWR, 6 months emergency),
+    5 MODEL_PORTFOLIOS, 6 RISK_QUESTIONS (3 tolerance + 3 capacity), FX + currency meta
+
+  format.ts
+    Indian L/Cr abbreviations for INR and K/M/B for USD, currency, percent, number,
+    years and signed-delta formatters, illustrative FX conversion
+
+  data/personas.ts
+    3 synthetic personas, each illustrating a different planning problem:
+      Aarav, 26  - good income, no buffer, expensive card debt
+      Meera, 38  - competing goals, home loan, under-insured
+      Rohan, 52  - eight years out, portfolio too aggressive, one big position
+
+--------------------------------------------------------------------------------
+A4. THE AGENT (packages/server/src/agent)
+--------------------------------------------------------------------------------
+  Workflow: PLAN -> ACT -> SYNTHESIZE -> VERIFY, every phase narrated over SSE.
+  A hand-written loop rather than the SDK tool runner, because each phase has to be
+  streamed to the client and the plan revised as tools return.
+
+  Core guarantee: the model narrates, it never calculates. Every figure comes from
+  a tool result, and the verifier re-checks each number in the prose against the
+  tool outputs. Unmatched figures are reported as unverified, not trusted.
+
+  12 tools, each returning summary (for the trace) + data (for UI cards) +
+  facts (for the verifier):
+    get_financial_snapshot, project_goal, simulate_scenario, run_monte_carlo,
+    analyze_portfolio, recommend_allocation, get_next_best_actions,
+    plan_debt_payoff, compare_scenarios, search_knowledge, update_plan,
+    list_scenario_presets
+
+  intent.ts       10 intents (overview, goal, whatif, portfolio, actions, debt,
+                  probability, education, update, compare) via phrase/word scoring.
+                  It IS the planner in deterministic mode, and the instant
+                  first-paint plan plus LLM fallback otherwise.
+  knowledge/      14-document planning corpus with BM25 retrieval and a light
+                  stemmer. Lexical on purpose: no model call, no vector store,
+                  works with zero credentials.
+  llm.ts          One interface over Bedrock / Anthropic API / none. Bedrock uses
+                  the Lambda execution role, so no API key exists in the system.
+  synthesis.ts    Template synthesiser for the no-credentials path - every
+                  sentence is built from a tool result, so it passes the same
+                  grounding verifier the model's answers go through.
+  verifier.ts     Extracts currency/percent/duration claims (Cr/L/k/M/B aware),
+                  matches them against tool facts, returns grounded/unverified
+                  with evidence. Deliberately conservative about bare integers.
+  orchestrator.ts System prompt with 5 absolute rules (never calculate, always
+                  read the position first, make assumptions visible, never claim
+                  market certainty, no product or security recommendations),
+                  answer-style rules, step ceiling, abort support.
+
+--------------------------------------------------------------------------------
+A5. API (26 endpoints)
+--------------------------------------------------------------------------------
+  Health/meta      GET  /api/health           engine + model + version
+                   GET  /api/ready            store reachability, 503 when down
+                   GET  /api/meta/assumptions full ledger + risk questionnaire
+
+  Profiles         GET  /api/profiles/personas
+                   GET  /api/profiles/risk-questions
+                   GET  /api/profiles                 list
+                   POST /api/profiles                 blank or persona-seeded
+                   GET  /api/profiles/:id
+                   PUT  /api/profiles/:id             full replace
+                   PATCH /api/profiles/:id            partial (arrays replace whole)
+                   DELETE /api/profiles/:id           also drops chat history
+                   GET  /api/profiles/:id/snapshot    THE main read
+                   POST /api/profiles/:id/risk        score, persist optional
+
+  Planning         GET  /api/plan/presets
+                   POST /api/plan/:id/scenario
+                   POST /api/plan/:id/scenarios/compare   up to 6, one baseline
+                   POST /api/plan/:id/goals/:goalId/project
+                   POST /api/plan/:id/monte-carlo
+                   POST /api/plan/:id/debt-plan
+                   GET  /api/plan/:id/allocation?years=
+
+  Agent            GET  /api/agent/capabilities
+                   GET  /api/agent/:id/stream?message=  SSE (11 event types)
+                   POST /api/agent/:id/ask              non-streaming + full trace
+                   GET  /api/agent/:id/sessions
+                   GET  /api/agent/sessions/:sessionId
+                   GET  /api/agent/knowledge?q=&limit=
+
+  Cross-cutting: Zod validation with bounded ranges and field-level 400s,
+  HttpError -> clean 4xx, 500s log to CloudWatch and never leak a stack trace,
+  1mb JSON limit, configurable CORS, request logging that skips SSE,
+  SSE keep-alive ping every 15s.
+
+--------------------------------------------------------------------------------
+A6. DATA, PERSISTENCE AND RUN MODES
+--------------------------------------------------------------------------------
+  * Store interface with two implementations: MemoryStore (local/tests) and
+    DynamoStore (single table, pk=PROFILE#id, sk=meta | SESSION#id, GSI for
+    listing so it never scans)
+  * The client persists only the profile id in localStorage; the snapshot is
+    computed locally from the profile by the shared engine, so every edit is
+    instant and the server is authoritative for persistence, not for display
+  * Three run modes selected by environment, no code change:
+      deterministic - no credentials at all, full feature set, rule-based prose
+      anthropic     - ANTHROPIC_API_KEY set
+      bedrock       - AWS region + Lambda execution role
+  * Tunables: PORT, NODE_ENV, LOG_LEVEL, CLAUDE_MODEL, MAX_AGENT_STEPS (6),
+    SIMULATION_PATHS (2000), REQUEST_TIMEOUT_MS, CORS_ORIGINS, TABLE_NAME
+
+--------------------------------------------------------------------------------
+A7. UI KIT AND CHARTS
+--------------------------------------------------------------------------------
+  Components: Card, Stat, Badge, ProgressBar, ScoreRing, AssumptionList, Callout,
+              Empty, MoneyInput, Slider, Money, ChartHeading
+  Charts:     MonteCarloFan, OutcomeHistogram, AllocationBar, AllocationLegend,
+              DriftChart, GoalFundingChart, PillarMeters, ExpenseBars,
+              ScenarioComparison, TableToggle (chart <-> table, for accessibility)
+
+--------------------------------------------------------------------------------
+A8. TESTS - 117, all green, no credentials needed
+--------------------------------------------------------------------------------
+  Engine (46)    solver round-trips (the required contribution fed back through the
+                 projection must land on the target), seeded reproducibility,
+                 percentile band ordering, the variance-drag correction, and
+                 invariants across all 3 personas: net worth reconciles, pillar
+                 weights sum to 1, allocations sum to 1, actions arrive ranked and
+                 every one carries assumptions
+  API+agent (42) real HTTP against a listening server: status codes, serialisation,
+                 intent routing, natural-language lever extraction, BM25 accuracy,
+                 every tool's output shape, the grounding verifier, SSE frame
+                 validity, a full conversation round-trip, and an assertion that
+                 the 42%-card-debt persona is told to clear it before investing
+  Client (29)    every page SSR-rendered for 3 personas + an empty profile +
+                 goals-without-holdings + no-goals + debt-free, asserting no NaN,
+                 undefined or Infinity reaches the user
+
+--------------------------------------------------------------------------------
+A9. CI/CD, INFRASTRUCTURE AND DOCS
+--------------------------------------------------------------------------------
+  GitHub Actions CI     lint -> typecheck -> test -> build -> cdk synth ->
+                        artefact upload; a separate API smoke-test job that boots
+                        the built API and runs the demo journey; dependency audit
+  GitHub Actions Deploy re-runs the gate (does not trust CI), OIDC role assume,
+                        cdk diff, deploy, post-deploy smoke test, deployment
+                        summary, and a step that reports which engine went live
+  buildspec.yml         the same gate for AWS CodeBuild/CodePipeline
+  CDK stack             DynamoDB (on-demand, ttl attribute configured, RETAIN in
+                        prod), Lambda (Node 22, ARM64, 1024MB, 60s, X-Ray active),
+                        HTTP API (payload format 2.0, single proxy route), S3 site
+                        bucket, CloudFront with 3 behaviours (no-store HTML,
+                        immutable hashed assets, uncached /api/*), SPA 403/404 ->
+                        index.html, bucket deployment with targeted invalidation,
+                        scoped Bedrock IAM (InvokeModel + streaming, including
+                        cross-region inference profiles), per-stage log retention,
+                        7 stack outputs (AppUrl, ApiUrl, DirectApiUrl, TableName,
+                        SiteBucketName, DistributionId, LambdaFunctionName)
+  Docs                  README, docs/ARCHITECTURE.md, docs/API.md,
+                        docs/DEPLOYMENT.md, docs/DEMO_SCRIPT.md, docs/deck/
+  Tooling               ESLint (zero warnings tolerated), Prettier, tsconfig
+                        project references, npm scripts: dev, build, test,
+                        typecheck, lint, format, verify, synth, deploy
+
+================================================================================
+PART B - DELIBERATELY NOT MODELLED (and said so in-app)
+================================================================================
+  * No taxes anywhere - no capital gains, dividend or income tax on any projection
+  * No transaction costs - brokerage, exit loads, spreads, rebalancing costs
+  * Thin tails - returns are log-normal and drawn independently; real markets
+    crash harder, more often, and in clusters
+  * Synthetic data only - no market feed, no account aggregation, no institution
+  * Not advice - illustrative planning output, not a regulated recommendation
+
+================================================================================
+PART C - GAPS AND CANDIDATE NEXT WORK
+================================================================================
+
+C1. BLOCKERS FOR ANYTHING BEYOND A DEMO
+  * NO AUTHENTICATION AT ALL. Any caller can list every profile
+    (GET /api/profiles), then read, overwrite or delete any of them by id. The
+    client just keeps a profile id in localStorage. Auth and per-user scoping are
+    required before this is exposed publicly.
+  * No rate limiting, no WAF, no request throttling. The agent endpoints call a
+    paid model and run 2,000-path simulations; both are wide open.
+  * No CloudWatch alarms or dashboards in the CDK stack - X-Ray tracing is on but
+    nothing watches error rate, latency or Bedrock throttling.
+  * DynamoDB has a ttl attribute configured but nothing ever writes it, so chat
+    sessions accumulate forever.
+
+C2. BUILT ON THE SERVER, NOT SURFACED IN THE UI  (cheapest wins)
+  * Chat history. GET /api/agent/:id/sessions and /sessions/:sessionId exist, and
+    api.sessions()/api.session() exist in the web client - but the Assistant page
+    only tracks the live sessionId. There is no conversation list, no reload, no
+    "new chat". This is a UI-only task against endpoints that already work.
+  * POST /api/plan/:id/scenarios/compare runs up to 6 scenarios server-side; the
+    Scenario Lab pins a maximum of 3 and compares them client-side only.
+  * GET /api/plan/:id/allocation (the 5-portfolio risk ladder with return and vol)
+    is rendered on Portfolio but not offered on Assumptions or Scenarios.
+
+C3. MISSING RULES AND MODEL FIDELITY
+  * healthInsuranceCover is collected in onboarding AND in the profile editor AND
+    typed on UserProfile - but no action rule ever reads it. Life cover has
+    close-life-cover-gap; health cover has nothing. The smallest high-value
+    addition in this whole list.
+  * No goal-priority optimiser. Goals compete for one surplus (the knowledge base
+    even has a document about it), but nothing allocates that surplus across goals
+    optimally - the user is told each gap separately.
+  * Retirement drawdown uses a single de-risked deterministic return to find the
+    depletion age; sequence-of-returns risk is only modelled in accumulation.
+  * use-tax-deduction checks remaining deductible room rather than computing an
+    actual tax saving, because there is no tax model to compute it with.
+  * Rebalance trades are shown gross - no exit load, no capital-gains consequence,
+    which for a real portfolio can reverse the recommendation.
+
+C4. PRODUCT SURFACE NOT YET BUILT
+  * No export of any kind: no PDF plan, no CSV, no shareable scenario link.
+  * No multi-currency beyond a display toggle at a hardcoded 83 INR/USD rate.
+  * No account aggregation or market data - every price is user-entered.
+  * No notifications, reminders, or progress-over-time tracking. The platform has
+    no concept of history: no snapshots are stored over time, so "am I doing better
+    than last quarter" cannot be answered at all.
+  * No PWA/offline support, no mobile app.
+
+C5. TESTING AND QUALITY
+  * Web tests are SSR smoke renders only - no interaction tests (no slider drag,
+    no Apply-to-my-plan click) and no end-to-end browser test.
+  * No load test or cold-start measurement against the deployed Lambda.
+  * No accessibility audit, though aria labels and chart/table toggles are present.
+  * No error tracking or product analytics in the client.
+
+C6. HOUSEKEEPING
+  * README says "Thirteen rule checks"; the engine has 14 action rules.
+  * scripts/ exists and is empty.
+  * The project is not a git repository - no version control, so none of the CI
+    workflows or the deploy pipeline can actually run yet. Worth fixing first if
+    any of C1-C5 gets picked up.
+
+--------------------------------------------------------------------------------
+A SUGGESTED ORDER, IF IT HELPS
+  1. git init + push (nothing in C1-C5 is verifiable by CI until this exists)
+  2. Health-cover rule (C3) - hours of work, and it closes a visible
+     data-collection loop the user can already see in onboarding
+  3. Chat history UI (C2) - about a day, against endpoints and client methods
+     that already work
+  4. Auth + per-user scoping (C1) - the gate on everything public-facing
+  5. Alarms + rate limiting (C1) - the gate on anything that costs money to run
+  6. Tax model (C3 / PART B) - the largest fidelity jump, and the biggest task here
+--------------------------------------------------------------------------------

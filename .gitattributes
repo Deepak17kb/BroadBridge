@@ -1,0 +1,14 @@
+# Normalise line endings. The repo is authored on Windows and built on
+# ubuntu-latest in CI; without this every file churns between CRLF and LF and
+# diffs become unreadable. Text is stored LF in the repo, checked out natively.
+* text=auto eol=lf
+
+# Shell scripts must stay LF even on a Windows checkout, or bash rejects them.
+*.sh text eol=lf
+
+# Binary
+*.png binary
+*.jpg binary
+*.ico binary
+*.pdf binary
+*.zip binary

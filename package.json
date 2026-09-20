@@ -1,0 +1,39 @@
+{
+  "name": "ai-wealth-navigator",
+  "private": true,
+  "version": "1.0.0",
+  "description": "AI Wealth Navigator - an agentic financial wellness platform (React + Node + AWS Bedrock)",
+  "type": "module",
+  "engines": {
+    "node": ">=20"
+  },
+  "workspaces": [
+    "packages/shared",
+    "packages/server",
+    "packages/web",
+    "infra"
+  ],
+  "scripts": {
+    "dev": "concurrently -n api,web -c cyan,magenta \"npm:dev:server\" \"npm:dev:web\"",
+    "dev:server": "npm run dev --workspace @wealth/server",
+    "dev:web": "npm run dev --workspace @wealth/web",
+    "build": "npm run build --workspace @wealth/server && npm run build --workspace @wealth/web",
+    "typecheck": "tsc --noEmit -p packages/shared && tsc --noEmit -p packages/server && tsc --noEmit -p packages/web && tsc --noEmit -p infra",
+    "test": "npm run test --workspace @wealth/shared && npm run test --workspace @wealth/server && npm run test --workspace @wealth/web",
+    "lint": "eslint . --ext .ts,.tsx --max-warnings 0",
+    "format": "prettier --write \"**/*.{ts,tsx,json,md,css}\"",
+    "verify": "npm run typecheck && npm run test && npm run build",
+    "synth": "npm run build && npm run synth --workspace @wealth/infra",
+    "deploy": "npm run build && npm run deploy --workspace @wealth/infra"
+  },
+  "devDependencies": {
+    "@types/node": "^22.10.2",
+    "@typescript-eslint/eslint-plugin": "^8.18.0",
+    "@typescript-eslint/parser": "^8.18.0",
+    "concurrently": "^9.1.0",
+    "eslint": "^8.57.1",
+    "prettier": "^3.4.2",
+    "tsx": "^4.19.2",
+    "typescript": "^5.7.2"
+  }
+}

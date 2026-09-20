@@ -1,0 +1,174 @@
+name: CI
+
+# Runs on every push and pull request. This is the gate: nothing reaches the
+# deploy workflow without passing here first.
+on:
+  push:
+    branches: [main, develop]
+  pull_request:
+    branches: [main, develop]
+  workflow_dispatch:
+
+concurrency:
+  # A new push supersedes an in-flight run on the same ref - there is no value
+  # in finishing CI for a commit that has already been replaced.
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  NODE_VERSION: '22'
+
+jobs:
+  verify:
+    name: Lint, typecheck, test, build
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+
+      # `npm ci` rather than `npm install`: it installs exactly the lockfile and
+      # fails if package.json and the lock have drifted apart.
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Lint
+        run: npm run lint
+
+      - name: Typecheck
+        run: npm run typecheck
+
+      # 117 tests across three packages: the finance engine's arithmetic, the
+      # API and agent end to end, and a server-side render of every page.
+      - name: Test
+        run: npm test
+
+      - name: Build
+        run: npm run build
+
+      # The stack must synthesize before a deploy is attempted. Catching an IaC
+      # error here costs seconds; catching it mid-deploy costs a rollback.
+      - name: Synthesize infrastructure
+        run: npm run synth --workspace @wealth/infra
+        env:
+          CDK_DEFAULT_ACCOUNT: '000000000000'
+          CDK_DEFAULT_REGION: ap-south-1
+
+      - name: Upload build artefacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: build-${{ github.sha }}
+          path: |
+            packages/server/dist
+            packages/web/dist
+          retention-days: 7
+
+  smoke:
+    name: API smoke test
+    runs-on: ubuntu-latest
+    needs: verify
+    timeout-minutes: 10
+
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+      - run: npm ci
+      - run: npm run build
+
+      # Starts the real bundled artefact and exercises the full journey the
+      # demo follows. A unit-test suite can pass while the bundle is broken -
+      # the workspace-externalisation bug that first shipped here did exactly
+      # that, which is why this job exists.
+      - name: Start API and run the demo journey
+        run: |
+          node packages/server/dist/index.js &
+          API_PID=$!
+          trap 'kill $API_PID 2>/dev/null || true' EXIT
+
+          for i in $(seq 1 20); do
+            if curl -fsS http://localhost:4000/api/health > /dev/null; then break; fi
+            sleep 1
+          done
+
+          echo "--- health ---"
+          curl -fsS http://localhost:4000/api/health | tee /dev/stderr | grep -q '"status":"ok"'
+
+          echo "--- create a profile from a persona ---"
+          PROFILE_ID=$(curl -fsS -X POST http://localhost:4000/api/profiles \
+            -H 'content-type: application/json' \
+            -d '{"personaId":"meera"}' | node -e \
+            'let b="";process.stdin.on("data",d=>b+=d).on("end",()=>console.log(JSON.parse(b).profile.id))')
+          test -n "$PROFILE_ID"
+          echo "profile: $PROFILE_ID"
+
+          echo "--- snapshot ---"
+          curl -fsS "http://localhost:4000/api/profiles/$PROFILE_ID/snapshot" | node -e \
+            'let b="";process.stdin.on("data",d=>b+=d).on("end",()=>{
+               const s=JSON.parse(b);
+               if(!(s.wellness.total>=0&&s.wellness.total<=100)) throw new Error("bad wellness score");
+               if(!s.actions.length) throw new Error("no actions generated");
+               if(!s.goalProjections.length) throw new Error("no goal projections");
+               console.log("wellness",s.wellness.total,"actions",s.actions.length);
+             })'
+
+          echo "--- scenario ---"
+          curl -fsS -X POST "http://localhost:4000/api/plan/$PROFILE_ID/scenario" \
+            -H 'content-type: application/json' \
+            -d '{"levers":{"extraMonthlySavings":20000},"paths":500}' | node -e \
+            'let b="";process.stdin.on("data",d=>b+=d).on("end",()=>{
+               const r=JSON.parse(b);
+               if(!(r.deltaVsBaseline.netWorthAtRetirement>0)) throw new Error("saving more did not help");
+               console.log("scenario delta", r.deltaVsBaseline.netWorthAtRetirement);
+             })'
+
+          echo "--- agent (deterministic engine, no credentials in CI) ---"
+          curl -fsS -X POST "http://localhost:4000/api/agent/$PROFILE_ID/ask" \
+            -H 'content-type: application/json' \
+            -d '{"message":"What should I do next?"}' | node -e \
+            'let b="";process.stdin.on("data",d=>b+=d).on("end",()=>{
+               const m=JSON.parse(b).message;
+               if(m.content.length<120) throw new Error("agent answer too thin");
+               if(!m.toolCalls.length) throw new Error("agent called no tools");
+               const checks=m.verification||[];
+               const grounded=checks.filter(c=>c.status==="grounded").length;
+               if(checks.length && grounded/checks.length < 0.95)
+                 throw new Error("answer was not fully grounded: "+JSON.stringify(checks));
+               console.log("tools", m.toolCalls.map(t=>t.tool).join(","), "| grounded", grounded+"/"+checks.length);
+             })'
+
+          echo "--- SSE stream ---"
+          curl -fsS --max-time 30 \
+            "http://localhost:4000/api/agent/$PROFILE_ID/stream?message=How%20am%20I%20doing" \
+            | grep -q 'event: final'
+
+          echo "All smoke checks passed."
+
+  security:
+    name: Dependency audit
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+      - run: npm ci
+
+      # High and critical advisories fail the build. Moderate ones are reported
+      # but do not block, because a transitive dev-only advisory should not stop
+      # a release on its own.
+      - name: Audit production dependencies
+        run: npm audit --audit-level=high --omit=dev
+
+      - name: Report all advisories
+        run: npm audit || true
