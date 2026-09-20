@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   formatCompact,
   formatPercent,
@@ -21,6 +21,14 @@ import { MonteCarloFan, TableToggle } from '../components/charts/Charts';
  * something a user can audit. It is also the honest way to present an agent -
  * the work is real, so it can be shown.
  */
+
+/** One row of the conversation list, as `GET /api/agent/:id/sessions` returns it. */
+interface SessionSummary {
+  id: string;
+  updatedAt: string;
+  messageCount: number;
+  preview: string;
+}
 
 interface TraceToolCall {
   id: string;
@@ -60,6 +68,10 @@ export function Assistant() {
   const [error, setError] = useState<string | null>(null);
   const [sessionId, setSessionId] = useState<string | undefined>(undefined);
   const [capabilities, setCapabilities] = useState<AgentCapabilities | null>(null);
+  const [sessions, setSessions] = useState<SessionSummary[]>([]);
+  const [historyOpen, setHistoryOpen] = useState(false);
+  const [loadingSession, setLoadingSession] = useState<string | null>(null);
+  const [confirmDelete, setConfirmDelete] = useState<string | null>(null);
 
   const logRef = useRef<HTMLDivElement>(null);
   const cancelRef = useRef<(() => void) | null>(null);
@@ -68,6 +80,18 @@ export function Assistant() {
     api.capabilities().then(setCapabilities).catch(() => setCapabilities(null));
   }, []);
 
+  const refreshSessions = useCallback(() => {
+    api
+      .sessions(profile.id)
+      .then(setSessions)
+      // A failed history load must never block asking a question.
+      .catch(() => setSessions([]));
+  }, [profile.id]);
+
+  useEffect(() => {
+    refreshSessions();
+  }, [refreshSessions]);
+
   // Keep the newest message in view as tokens arrive.
   useEffect(() => {
     logRef.current?.scrollTo({ top: logRef.current.scrollHeight, behavior: 'smooth' });
@@ -75,6 +99,79 @@ export function Assistant() {
 
   // Close the stream if the user navigates away mid-answer.
   useEffect(() => () => cancelRef.current?.(), []);
+
+  /** Everything that belongs to one conversation, cleared together. */
+  function resetTurnState() {
+    setStreamedText('');
+    setPlan([]);
+    setRationale('');
+    setToolCalls([]);
+    setRetrievals([]);
+    setVerification([]);
+    setThoughts([]);
+    setError(null);
+  }
+
+  function newChat() {
+    if (streaming) cancelRef.current?.();
+    setStreaming(false);
+    setMessages([]);
+    setSessionId(undefined);
+    setInput('');
+    resetTurnState();
+  }
+
+  /**
+   * Reopens a stored conversation.
+   *
+   * The trace comes back with it: every assistant turn persists its own plan,
+   * tool calls, verification and attachments, so a reloaded answer is as
+   * auditable as a live one. Tool *summaries* and inputs are not stored - only
+   * the name, label and timing - so restored calls show what ran and how long it
+   * took, without inventing detail that was never persisted.
+   */
+  async function openSession(id: string) {
+    if (streaming || loadingSession) return;
+    setLoadingSession(id);
+    try {
+      const stored = await api.session(id);
+      resetTurnState();
+      setMessages(stored.messages);
+      setSessionId(stored.id);
+      setHistoryOpen(false);
+
+      const lastTurn = [...stored.messages].reverse().find((m) => m.role === 'assistant');
+      setPlan(lastTurn?.plan ?? []);
+      setVerification(lastTurn?.verification ?? []);
+      setToolCalls(
+        (lastTurn?.toolCalls ?? []).map((call, i) => ({
+          id: `${stored.id}-restored-${i}`,
+          tool: call.tool,
+          label: call.label,
+          input: undefined,
+          ms: call.ms,
+          status: 'done' as const,
+        })),
+      );
+    } catch {
+      setError('That conversation could not be loaded.');
+    } finally {
+      setLoadingSession(null);
+    }
+  }
+
+  async function removeSession(id: string) {
+    // Optimistic: the row goes immediately and the delete is idempotent server
+    // side, so a failed request cannot leave a half-deleted conversation.
+    setSessions((list) => list.filter((s) => s.id !== id));
+    setConfirmDelete(null);
+    if (id === sessionId) newChat();
+    try {
+      await api.deleteSession(id);
+    } finally {
+      refreshSessions();
+    }
+  }
 
   function ask(question: string) {
     const text = question.trim();
@@ -86,14 +183,7 @@ export function Assistant() {
     ]);
     setInput('');
     setStreaming(true);
-    setStreamedText('');
-    setPlan([]);
-    setRationale('');
-    setToolCalls([]);
-    setRetrievals([]);
-    setVerification([]);
-    setThoughts([]);
-    setError(null);
+    resetTurnState();
 
     cancelRef.current = streamAgent(profile.id, text, sessionId, {
       onEvent: (event: AgentEvent) => {
@@ -146,6 +236,9 @@ export function Assistant() {
       onDone: () => {
         setStreaming(false);
         cancelRef.current = null;
+        // The turn is persisted server-side by now, so the list picks up a new
+        // conversation or a bumped timestamp without a reload.
+        refreshSessions();
       },
       onError: (message) => {
         setError(message);
@@ -216,6 +309,97 @@ export function Assistant() {
           switch it on.
         </Callout>
       )}
+
+      {/* Conversation history. Collapsed by default so it never competes with
+          the answer, but one click from any past question. */}
+      <Card>
+        <div className="row-between">
+          <button
+            className="btn btn-ghost"
+            onClick={() => setHistoryOpen((open) => !open)}
+            aria-expanded={historyOpen}
+            disabled={sessions.length === 0}
+          >
+            {historyOpen ? '▾' : '▸'} Past conversations
+            {sessions.length > 0 && (
+              <span className="text-muted" style={{ marginLeft: 6 }}>
+                ({sessions.length})
+              </span>
+            )}
+          </button>
+          <div className="row" style={{ gap: 8 }}>
+            {sessionId && (
+              <span className="text-xs text-subtle">
+                {messages.length} message{messages.length === 1 ? '' : 's'} in this conversation
+              </span>
+            )}
+            <button
+              className="btn"
+              onClick={newChat}
+              disabled={streaming || (messages.length === 0 && !sessionId)}
+            >
+              New chat
+            </button>
+          </div>
+        </div>
+
+        {sessions.length === 0 && (
+          <p className="text-xs text-subtle" style={{ marginTop: 8 }}>
+            Conversations are saved as you have them, and reopen here with their full reasoning
+            trace.
+          </p>
+        )}
+
+        {historyOpen && sessions.length > 0 && (
+          <div className="stack-sm" style={{ marginTop: 12 }}>
+            {sessions.map((s) => (
+              <div
+                key={s.id}
+                className="row-between session-row"
+                style={{
+                  gap: 10,
+                  padding: '8px 10px',
+                  borderRadius: 8,
+                  background: s.id === sessionId ? 'var(--surface-hover)' : undefined,
+                }}
+              >
+                <button
+                  className="btn btn-ghost"
+                  style={{ flex: 1, justifyContent: 'flex-start', textAlign: 'left', minWidth: 0 }}
+                  onClick={() => openSession(s.id)}
+                  disabled={streaming || loadingSession !== null}
+                  title={s.preview}
+                >
+                  <span className="truncate">{s.preview || 'Untitled conversation'}</span>
+                </button>
+                <span className="text-xs text-subtle" style={{ whiteSpace: 'nowrap' }}>
+                  {s.messageCount} msg · {new Date(s.updatedAt).toLocaleDateString()}
+                </span>
+                {loadingSession === s.id && <span className="spinner" />}
+                {confirmDelete === s.id ? (
+                  <span className="row" style={{ gap: 6 }}>
+                    <button className="btn btn-danger" onClick={() => removeSession(s.id)}>
+                      Delete
+                    </button>
+                    <button className="btn btn-ghost" onClick={() => setConfirmDelete(null)}>
+                      Cancel
+                    </button>
+                  </span>
+                ) : (
+                  <button
+                    className="btn btn-ghost"
+                    onClick={() => setConfirmDelete(s.id)}
+                    aria-label={`Delete conversation: ${s.preview || 'untitled'}`}
+                    disabled={streaming}
+                  >
+                    ✕
+                  </button>
+                )}
+              </div>
+            ))}
+          </div>
+        )}
+      </Card>
 
       <div className="chat">
         <div className="chat-panel">

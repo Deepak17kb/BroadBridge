@@ -342,6 +342,46 @@ test('conversation history is persisted and replayable', async () => {
   assert.ok(sessions.some((s: { id: string }) => s.id === sessionId));
 });
 
+test('a stored conversation carries its own reasoning trace', async () => {
+  // The UI reopens a past conversation and re-renders its trace from the stored
+  // turn alone. If any of this stops being persisted, a reloaded answer silently
+  // becomes unauditable while still looking identical.
+  const profileId = await seedProfile('meera');
+  const { sessionId } = await ask(profileId, 'Am I on track for retirement?');
+
+  const session = await json(await fetch(`${baseUrl}/api/agent/sessions/${sessionId}`));
+  const assistantTurn = session.messages.find((m: { role: string }) => m.role === 'assistant');
+  assert.ok(assistantTurn);
+  assert.ok(assistantTurn.plan?.length, 'the plan survives the round-trip');
+  assert.ok(assistantTurn.toolCalls?.length, 'tool calls survive, with their timings');
+  assert.ok(
+    assistantTurn.toolCalls.every((c: { tool: string; label: string; ms: number }) =>
+      Boolean(c.tool && c.label) && Number.isFinite(c.ms),
+    ),
+  );
+  assert.ok(assistantTurn.verification?.length, 'the grounding check survives');
+});
+
+test('a conversation can be deleted, and deleting it twice is not an error', async () => {
+  const profileId = await seedProfile('aarav');
+  const { sessionId } = await ask(profileId, 'How am I doing?');
+
+  const listed = await json(await fetch(`${baseUrl}/api/agent/${profileId}/sessions`));
+  assert.ok(listed.some((s: { id: string }) => s.id === sessionId));
+
+  const deleted = await fetch(`${baseUrl}/api/agent/sessions/${sessionId}`, { method: 'DELETE' });
+  assert.equal(deleted.status, 204);
+
+  const after = await json(await fetch(`${baseUrl}/api/agent/${profileId}/sessions`));
+  assert.ok(!after.some((s: { id: string }) => s.id === sessionId), 'it is gone from the list');
+  assert.equal((await fetch(`${baseUrl}/api/agent/sessions/${sessionId}`)).status, 404);
+
+  // The client deletes optimistically and retries on a dropped response, so a
+  // second delete of the same id must succeed rather than 404.
+  const again = await fetch(`${baseUrl}/api/agent/sessions/${sessionId}`, { method: 'DELETE' });
+  assert.equal(again.status, 204);
+});
+
 test('the streaming endpoint emits a well-formed SSE trace', async () => {
   const profileId = await seedProfile('meera');
   const res = await fetch(

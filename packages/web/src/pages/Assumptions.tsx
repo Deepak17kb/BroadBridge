@@ -12,6 +12,7 @@ import {
 import { api } from '../lib/api';
 import { useLoadedProfile, useProfile } from '../state/ProfileContext';
 import { Badge, Callout, Card, Slider, Stat } from '../components/ui';
+import { RiskLadder, useRiskLadder } from '../components/RiskLadder';
 
 /**
  * The assumptions ledger, made editable.
@@ -24,11 +25,16 @@ import { Badge, Callout, Card, Slider, Stat } from '../components/ui';
  */
 export function Assumptions() {
   const { profile, snapshot } = useLoadedProfile();
-  const { updateProfile } = useProfile();
+  const { updateProfile, saveState } = useProfile();
   const { currency } = profile;
   const assumptions = snapshot.assumptions;
 
   const [knowledge, setKnowledge] = useState<{ id: string; title: string; tags: string[] }[]>([]);
+
+  // Keyed on the save state, not on `updatedAt`: the endpoint reads the stored
+  // profile, and `updatedAt` bumps on every keystroke while the save is still
+  // debounced - refetching then would just re-fetch the pre-edit figures.
+  const ladder = useRiskLadder(profile.id, saveState === 'saved');
 
   useEffect(() => {
     api
@@ -211,6 +217,22 @@ export function Assumptions() {
           </div>
         </Card>
       </div>
+
+      {/* What the edits above actually do, across every portfolio rather than
+          just the user's own. Re-priced by the server from the stored profile,
+          so it follows a beat behind the sliders - it refreshes on each save. */}
+      {ladder.length > 0 && (
+        <Card
+          title="What your assumptions do to every portfolio"
+          subtitle="The five model mixes, re-priced from the figures above each time your changes save"
+        >
+          <RiskLadder
+            rows={ladder}
+            yourBucket={snapshot.risk.bucket}
+            footnote="Raise an expected return or a volatility above and every row moves, not just yours. That is the point of showing all five: the recommended mix is chosen against these alternatives, so changing the inputs can change which one is right for you."
+          />
+        </Card>
+      )}
 
       <Card
         title="Protection"

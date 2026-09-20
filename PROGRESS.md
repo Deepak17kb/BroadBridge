@@ -258,3 +258,91 @@ band boundaries and the dependent loading; and a ledger override widening the ga
   added paragraph is written to be true as scored; the pre-existing sentence is not
   mine to rewrite. Worth a decision in T17: either enforce banded scores or correct
   the copy.
+
+---
+
+## T3 — Surface what is already built  [done]
+
+Not quite the UI-only task the brief expected: delete-session had no endpoint, and
+the Scenario Lab had no allocation control at all to attach the ladder to. Both
+were built.
+
+**Files touched**
+- `packages/server/src/store/index.ts` — `deleteSession` on the `Store` interface
+  and both implementations (Dynamo reads the item first: the session id alone does
+  not give the partition key)
+- `packages/server/src/routes/agent.ts` — `DELETE /api/agent/sessions/:sessionId`
+- `packages/web/src/lib/api.ts` — `api.deleteSession`
+- `packages/web/src/pages/Assistant.tsx` — conversation history
+- `packages/web/src/pages/Scenarios.tsx` — server-side comparison, pin limit 3 → 6,
+  allocation override via the ladder
+- `packages/web/src/components/RiskLadder.tsx` (new) — the ladder, extracted
+- `packages/web/src/pages/Portfolio.tsx` — rewired onto the shared component
+- `packages/web/src/pages/Assumptions.tsx` — the ladder, re-priced by your edits
+- `packages/web/src/styles.css` — `.session-row`, `.truncate`
+- `packages/server/test/agent.test.ts` — 2 new tests
+- `docs/API.md` — the DELETE endpoint, and what a stored session actually carries
+
+**1. Chat history** — collapsible list above the chat, showing each conversation's
+first question, message count and date. Clicking one reloads it *with its trace*:
+every assistant turn persists its own plan, tool calls, verification and
+attachments, so a reopened answer is as auditable as a live one. "New chat" clears
+the session. Delete is a two-step inline confirm, optimistic, and refreshes the
+list afterwards. The list also refreshes when a run finishes, so a new conversation
+appears without a reload.
+
+**2. Server-side comparison** — pinned scenarios now go through
+`POST /api/plan/:id/scenarios/compare`, which scores all of them against one
+baseline it builds once. Pin limit raised 3 → 6, matching the endpoint's cap.
+
+**3. The risk ladder** — now on three screens. On Assumptions it answers "what do my
+edits do to *every* portfolio, not just mine". In the Scenario Lab it is the
+allocation-override control.
+
+**Decisions I made without asking**
+- **Extracted `RiskLadder` into a component rather than copying the table.** The
+  task puts the same 50-line table on three screens; three copies is exactly the
+  "second implementation to drift" problem constraint 1 exists to prevent. This
+  touches Portfolio, which T3 did not name — the alternative was worse.
+- **The live scenario row stays local; only pinned rows go to the server.** Pinned
+  rows do not depend on the live levers, so the request fires when the pinned set
+  or the saved profile changes, not on every slider settle. Dragging stays instant
+  and the network is not hammered.
+- **Server comparison falls back to the browser engine on failure**, with a visible
+  note. Constraint 2: the feature has to work offline and with no credentials. The
+  numbers are identical either way — the only thing lost is the shared baseline.
+- **The Assumptions ladder refreshes on `saveState === 'saved'`, not on
+  `profile.updatedAt`.** `updatedAt` bumps on every keystroke while the save is
+  still debounced, so keying on it would re-fetch the *pre-edit* figures and show
+  them as if they were the result. The card says the rows follow each save.
+- **The Scenario Lab allocation control is the ladder, not six weight sliders.**
+  The engine has always accepted `levers.allocation` and nothing in the UI could
+  set it. The real question is "what if I moved a risk level", and the ladder is
+  the only place that trade is priced. Selection is matched by comparing weights,
+  so a preset that sets an allocation directly still highlights the right row.
+- **Delete is idempotent (204 on an unknown id).** The client deletes optimistically;
+  a 404 on retry would report failure for work that already succeeded.
+- **No `window.confirm`** for delete — a two-step inline confirm instead. A modal
+  blocks the page and is untestable in a headless browser, which T16 will need.
+
+**Tests added (2)** — real output:
+```
+ℹ tests 52   ℹ pass 52   ℹ fail 0      (shared)
+ℹ tests 44   ℹ pass 44   ℹ fail 0      (server — was 42)
+ℹ tests 29   ℹ pass 29   ℹ fail 0      (web)
+$ npm run lint       → LINT_EXIT=0
+$ npm run typecheck  → TYPECHECK_EXIT=0
+$ npm run build      → BUILD_EXIT=0   (✓ built in 2.41s)
+```
+Total **125**. A stored conversation carries a usable trace (plan, tool calls with
+finite timings, verification) — this is what makes reopening one honest rather than
+decorative; and a conversation can be deleted, disappears from the list, 404s on
+read, and a second delete still returns 204.
+
+**Anything I deliberately left out**
+- **No test drives the new UI.** The web suite is SSR smoke renders only, so nothing
+  can click "New chat" or pin six scenarios. The endpoints underneath are covered;
+  the interactions are not. That gap is T16's job and I have not pre-empted it.
+- Restored tool calls show name, label and timing but no summary, because summaries
+  were never persisted. Persisting them would change the stored session shape and
+  grow every item — worth doing in T7 when snapshots arrive, not silently here.

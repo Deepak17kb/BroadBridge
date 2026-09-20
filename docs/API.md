@@ -239,6 +239,14 @@ Returns the answer **and the trace**, so a non-streaming client still gets the e
 
 List a profile's conversations, or fetch one with its full message history.
 
+The list returns `{ id, createdAt, updatedAt, messageCount, preview }` per conversation — enough for a history sidebar without pulling every message. The single-session read returns the whole `ChatSession`, and each assistant turn carries its own `plan`, `toolCalls`, `verification`, `citations`, `assumptions` and `attachments`. A reopened conversation is therefore as auditable as a live one; tool *summaries* and inputs are not persisted, so a restored trace shows which tools ran and how long each took, but not what each returned.
+
+### `DELETE /api/agent/sessions/:sessionId`
+
+Deletes one conversation. `204`.
+
+Idempotent by design: deleting an unknown or already-deleted id also returns `204`, never `404`. The client removes the row optimistically and retries on a dropped response, so a second delete must not report an error for work that already succeeded.
+
 ### `GET /api/agent/knowledge?q=...&limit=3`
 
 BM25 search over the knowledge base. Omit `q` to list every document. Exposed so the UI can show what grounds an answer.

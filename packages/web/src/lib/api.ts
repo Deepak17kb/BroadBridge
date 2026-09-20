@@ -175,6 +175,9 @@ export const api = {
 
   session: (sessionId: string) => request<ChatSession>(`/agent/sessions/${sessionId}`),
 
+  deleteSession: (sessionId: string) =>
+    request<void>(`/agent/sessions/${sessionId}`, { method: 'DELETE' }),
+
   searchKnowledge: (query: string) =>
     request<{ id: string; title: string; score: number; snippet: string }[]>(
       `/agent/knowledge?q=${encodeURIComponent(query)}`,

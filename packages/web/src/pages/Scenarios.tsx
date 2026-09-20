@@ -4,11 +4,14 @@ import {
   formatPercent,
   runScenario,
   SCENARIO_PRESETS,
+  type AllocationWeights,
   type ScenarioLevers,
   type ScenarioResult,
 } from '@wealth/shared';
+import { api } from '../lib/api';
 import { useLoadedProfile } from '../state/ProfileContext';
 import { AssumptionList, Badge, Callout, Card, Slider, Stat } from '../components/ui';
+import { RiskLadder, useRiskLadder, type LadderRow } from '../components/RiskLadder';
 import { MonteCarloFan, OutcomeHistogram, ScenarioComparison, TableToggle } from '../components/charts/Charts';
 
 /**
@@ -27,6 +30,32 @@ import { MonteCarloFan, OutcomeHistogram, ScenarioComparison, TableToggle } from
 
 const EMPTY: ScenarioLevers = {};
 
+/** The comparison endpoint caps at six, so the pin control does too. */
+const MAX_PINNED = 6;
+
+interface ComparisonRow {
+  label: string;
+  value: number;
+  delta: number;
+  readiness: number;
+  success: number;
+  goals: number;
+  goalsTotal: number;
+}
+
+/** One mapping for both sources, so a server row and a local row cannot differ in shape. */
+function toComparisonRow(label: string, result: ScenarioResult): ComparisonRow {
+  return {
+    label,
+    value: result.snapshot.netWorthAtRetirement,
+    delta: result.deltaVsBaseline.netWorthAtRetirement,
+    readiness: result.snapshot.retirementReadiness,
+    success: result.monteCarlo.successProbability,
+    goals: result.snapshot.goalsOnTrack,
+    goalsTotal: result.snapshot.goalsTotal,
+  };
+}
+
 export function Scenarios() {
   const { profile, snapshot } = useLoadedProfile();
   const { currency } = profile;
@@ -35,6 +64,8 @@ export function Scenarios() {
   const [settled, setSettled] = useState<ScenarioLevers>(EMPTY);
   const [dragging, setDragging] = useState(false);
   const [saved, setSaved] = useState<{ label: string; levers: ScenarioLevers }[]>([]);
+  const [pinnedRows, setPinnedRows] = useState<ComparisonRow[] | null>([]);
+  const [pinnedLocally, setPinnedLocally] = useState(false);
   const timer = useRef<number | undefined>(undefined);
 
   // The interactive value updates instantly; the expensive simulation waits for
@@ -64,27 +95,83 @@ export function Scenarios() {
     [profile, settled, snapshot, dragging],
   );
 
+  /*
+   * Pinned scenarios are compared server-side.
+   *
+   * `/scenarios/compare` runs all of them against ONE baseline it builds once,
+   * which is the guarantee the endpoint exists to provide - comparing rows that
+   * were each scored against their own baseline is how a comparison quietly
+   * drifts. The live row stays local so dragging a slider is still instant, and
+   * the same engine runs on both sides, so the two cannot disagree.
+   *
+   * The request fires when the pinned set changes or the profile is saved, not
+   * on every drag: the pinned rows do not depend on the live levers.
+   */
+  useEffect(() => {
+    if (saved.length === 0) {
+      setPinnedRows([]);
+      setPinnedLocally(false);
+      return;
+    }
+    let cancelled = false;
+    api
+      .compareScenarios(
+        profile.id,
+        saved.map((s) => ({ label: s.label, levers: s.levers })),
+      )
+      .then((res) => {
+        if (cancelled) return;
+        setPinnedRows(res.results.map((r) => toComparisonRow(r.label, r)));
+        setPinnedLocally(false);
+      })
+      .catch(() => {
+        // Offline, or the profile has not been persisted yet. Fall back to the
+        // browser's own engine rather than showing an empty comparison.
+        if (cancelled) return;
+        setPinnedRows(null);
+        setPinnedLocally(true);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [profile.id, profile.updatedAt, saved]);
+
   const comparison = useMemo(() => {
-    const rows = [
-      { label: 'Your scenario', levers: settled },
-      ...saved,
-    ];
-    return rows.map((r) => {
-      const res = runScenario({ profile, levers: r.levers, baseline: snapshot, paths: 600 });
-      return {
-        label: r.label,
-        value: res.snapshot.netWorthAtRetirement,
-        delta: res.deltaVsBaseline.netWorthAtRetirement,
-        readiness: res.snapshot.retirementReadiness,
-        success: res.monteCarlo.successProbability,
-        goals: res.snapshot.goalsOnTrack,
-        goalsTotal: res.snapshot.goalsTotal,
-      };
-    });
-  }, [profile, snapshot, settled, saved]);
+    const live = toComparisonRow(
+      'Your scenario',
+      runScenario({ profile, levers: settled, baseline: snapshot, paths: 600 }),
+    );
+    const pinned =
+      pinnedRows ??
+      saved.map((s) =>
+        toComparisonRow(
+          s.label,
+          runScenario({ profile, levers: s.levers, baseline: snapshot, paths: 600 }),
+        ),
+      );
+    return [live, ...pinned];
+  }, [profile, snapshot, settled, saved, pinnedRows]);
 
   const set = <K extends keyof ScenarioLevers>(key: K, value: ScenarioLevers[K]) =>
     setLevers((current) => ({ ...current, [key]: value }));
+
+  const ladder = useRiskLadder(profile.id);
+
+  /*
+   * Which ladder row the override currently matches. Compared by weights rather
+   * than stored as a bucket name, so a preset or a restored scenario that sets
+   * an allocation directly still lights up the right row.
+   */
+  const selectedBucket = useMemo(() => {
+    const chosen = levers.allocation;
+    if (!chosen) return undefined;
+    const match = ladder.find((row: LadderRow) =>
+      Object.entries(row.weights).every(
+        ([k, v]) => Math.abs((chosen[k as keyof AllocationWeights] ?? 0) - v) < 1e-9,
+      ),
+    );
+    return match?.bucket;
+  }, [levers.allocation, ladder]);
 
   const hasLevers = Object.values(settled).some((v) => v !== undefined);
   const income = snapshot.cashflow.monthlyIncome || 100000;
@@ -247,15 +334,50 @@ export function Scenarios() {
               format={(v) => formatPercent(v, 0)}
             />
 
+            {/* Allocation override. The engine has always accepted one; until
+                now nothing in the UI could set it, so the one lever that changes
+                *how* the money is invested was unreachable. Shown as the ladder
+                rather than six weight sliders: the question a user actually has
+                is "what if I moved up or down a risk level", and the ladder is
+                the only place the cost of that move is visible. */}
+            {ladder.length > 0 && (
+              <>
+                <div className="divider" />
+                <div className="stat-label">Invest differently</div>
+                <RiskLadder
+                  rows={ladder}
+                  yourBucket={snapshot.risk.bucket}
+                  selectedBucket={selectedBucket}
+                  onSelect={(row) =>
+                    set(
+                      'allocation',
+                      row.bucket === selectedBucket
+                        ? undefined
+                        : (row.weights as AllocationWeights),
+                    )
+                  }
+                  footnote={
+                    selectedBucket
+                      ? `Modelling the ${selectedBucket} mix. Click it again to go back to your own allocation.`
+                      : 'Click a risk level to model that mix instead of your current one. Expected return and volatility both move — the scenario below prices the trade.'
+                  }
+                />
+              </>
+            )}
+
             <div className="divider" />
             <div className="row-wrap">
               <button
                 className="btn btn-sm"
-                disabled={!hasLevers || saved.length >= 3}
+                disabled={!hasLevers || saved.length >= MAX_PINNED}
                 onClick={() =>
                   setSaved((s) => [...s, { label: result.label.slice(0, 40), levers: settled }])
                 }
-                title={saved.length >= 3 ? 'Up to three saved scenarios' : 'Pin this scenario for comparison'}
+                title={
+                  saved.length >= MAX_PINNED
+                    ? `Up to ${MAX_PINNED} pinned scenarios`
+                    : 'Pin this scenario for comparison'
+                }
               >
                 Pin for comparison
               </button>
@@ -379,13 +501,23 @@ export function Scenarios() {
 
             <Card
               title="Option comparison"
-              subtitle={saved.length ? 'Your scenario against the ones you pinned' : 'Pin a scenario to compare alternatives side by side'}
+              subtitle={
+                saved.length
+                  ? `Your scenario against the ${saved.length} you pinned, all scored on one baseline`
+                  : `Pin up to ${MAX_PINNED} scenarios to compare alternatives side by side`
+              }
             >
               <ScenarioComparison
                 rows={comparison}
                 baseline={snapshot.retirement.projectedCorpus}
                 currency={currency}
               />
+              {pinnedLocally && (
+                <p className="text-xs text-subtle" style={{ marginTop: 8 }}>
+                  Scored in your browser — the server comparison was unreachable. Same engine, same
+                  numbers; the only thing lost is the shared baseline.
+                </p>
+              )}
               <TableToggle>
                 <table className="data">
                   <thead>

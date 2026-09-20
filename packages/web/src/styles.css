@@ -1776,3 +1776,20 @@ table.data th.right {
     scroll-behavior: auto !important;
   }
 }
+
+/* Conversation history rows on the Assistant page. The preview is one line
+   whatever its length, so a long first question cannot push the date and the
+   delete control off the row. */
+.session-row {
+  border: 1px solid transparent;
+}
+.session-row:hover {
+  border-color: var(--border);
+}
+.truncate {
+  display: block;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  min-width: 0;
+}

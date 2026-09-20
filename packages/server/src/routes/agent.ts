@@ -203,6 +203,22 @@ router.get(
   }),
 );
 
+/**
+ * Deletes one conversation.
+ *
+ * Idempotent by design: a second delete of the same id returns 204 rather than
+ * 404. The client removes the row optimistically, so a retry after a dropped
+ * response must not surface an error for work that already succeeded.
+ */
+router.delete(
+  '/sessions/:sessionId',
+  asyncHandler(async (req, res) => {
+    const store = await getStore();
+    await store.deleteSession(req.params.sessionId as string);
+    res.status(204).end();
+  }),
+);
+
 /** Knowledge-base search, exposed so the UI can show what grounds an answer. */
 router.get(
   '/knowledge',

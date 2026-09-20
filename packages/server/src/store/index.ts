@@ -19,6 +19,8 @@ export interface Store {
   getSession(id: string): Promise<ChatSession | null>;
   putSession(session: ChatSession): Promise<ChatSession>;
   listSessions(profileId: string): Promise<ChatSession[]>;
+  /** Removes one conversation. Idempotent: deleting an unknown id is not an error. */
+  deleteSession(id: string): Promise<void>;
 }
 
 export class MemoryStore implements Store {
@@ -64,6 +66,10 @@ export class MemoryStore implements Store {
       .filter((s) => s.profileId === profileId)
       .map((s) => structuredClone(s))
       .sort((a, b) => b.updatedAt.localeCompare(a.updatedAt));
+  }
+
+  async deleteSession(id: string): Promise<void> {
+    this.sessions.delete(id);
   }
 }
 
@@ -207,6 +213,21 @@ export class DynamoStore implements Store {
     return (result.Items ?? [])
       .map((item) => item.data as ChatSession)
       .sort((a, b) => b.updatedAt.localeCompare(a.updatedAt));
+  }
+
+  async deleteSession(id: string): Promise<void> {
+    const { DeleteCommand } = await import('@aws-sdk/lib-dynamodb');
+    // The session id alone does not give the partition key, and the item
+    // carries the profile it belongs to - so read it first rather than asking
+    // the caller to pass a profile id the route does not have.
+    const session = await this.getSession(id);
+    if (!session) return;
+    await this.client.send(
+      new DeleteCommand({
+        TableName: this.table,
+        Key: { pk: this.pk(session.profileId), sk: `SESSION#${id}` },
+      }),
+    );
   }
 }
 

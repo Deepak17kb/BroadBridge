@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useMemo, useState } from 'react';
 import {
   ASSET_LABELS,
   formatCompact,
@@ -6,9 +6,9 @@ import {
   planDebtPayoff,
   type AssetClass,
 } from '@wealth/shared';
-import { api } from '../lib/api';
 import { useLoadedProfile, useProfile } from '../state/ProfileContext';
 import { AssumptionList, Badge, Callout, Card, Empty, MoneyInput, Slider, Stat } from '../components/ui';
+import { RiskLadder, useRiskLadder } from '../components/RiskLadder';
 import { AllocationBar, AllocationLegend, DriftChart } from '../components/charts/Charts';
 
 /**
@@ -27,14 +27,8 @@ export function Portfolio() {
   const { currency } = profile;
   const { portfolio } = snapshot;
 
-  const [ladder, setLadder] = useState<
-    { bucket: string; weights: Record<string, number>; expectedReturnPct: number; volatilityPct: number }[]
-  >([]);
+  const ladder = useRiskLadder(profile.id);
   const [extraDebtPayment, setExtraDebtPayment] = useState(0);
-
-  useEffect(() => {
-    api.allocationLadder(profile.id).then(setLadder).catch(() => setLadder([]));
-  }, [profile.id]);
 
   const debtPlans = useMemo(() => {
     if (profile.liabilities.length === 0) return null;
@@ -247,48 +241,11 @@ export function Portfolio() {
               title="The risk ladder"
               subtitle="What each risk level is expected to return, and what it costs in volatility"
             >
-              <div className="table-wrap">
-                <table className="data">
-                  <thead>
-                    <tr>
-                      <th>Risk level</th>
-                      <th className="right">Expected return</th>
-                      <th className="right">Volatility</th>
-                      <th className="right">Equity share</th>
-                      <th>Mix</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {ladder.map((row) => {
-                      const equity =
-                        (row.weights.equity_domestic ?? 0) +
-                        (row.weights.equity_international ?? 0) +
-                        (row.weights.reit ?? 0);
-                      const isYours = row.bucket === snapshot.risk.bucket;
-                      return (
-                        <tr key={row.bucket} style={isYours ? { background: 'var(--accent-soft)' } : undefined}>
-                          <td>
-                            {row.bucket} {isYours && <Badge tone="accent">yours</Badge>}
-                          </td>
-                          <td className="right num">{formatPercent(row.expectedReturnPct)}</td>
-                          <td className="right num">{formatPercent(row.volatilityPct)}</td>
-                          <td className="right num">{formatPercent(equity, 0)}</td>
-                          <td style={{ minWidth: 190 }}>
-                            <AllocationBar
-                              weights={row.weights as Record<AssetClass, number>}
-                              label=""
-                            />
-                          </td>
-                        </tr>
-                      );
-                    })}
-                  </tbody>
-                </table>
-              </div>
-              <p className="text-xs text-subtle" style={{ marginTop: 11 }}>
-                Higher expected return always costs volatility — that is the trade, and no mix escapes
-                it. Your row is chosen by the lower of your willingness and your ability to take risk.
-              </p>
+              <RiskLadder
+                rows={ladder}
+                yourBucket={snapshot.risk.bucket}
+                footnote="Higher expected return always costs volatility — that is the trade, and no mix escapes it. Your row is chosen by the lower of your willingness and your ability to take risk."
+              />
             </Card>
           )}
 
