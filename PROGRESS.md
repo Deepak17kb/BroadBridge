@@ -1198,9 +1198,17 @@ Decisions I made without asking:
 - **The "Quantified upside" card became "One-click actions"** rather than being
   relabelled: no label makes that sum meaningful. The dashboard's impact
   figure is the honest "what is it worth".
-- **Not committed.** The working tree already held ~2,300 lines of earlier,
-  uncommitted work across the same files; a commit now would bundle it with
-  these fixes. Left for you to split or commit.
+- **Committed separately from the earlier work.** The working tree already held
+  ~2,300 lines of earlier, uncommitted work in the same files (the Groq,
+  optimiser, INR-only and onboarding entries above). On request it was
+  committed first, rebuilt exactly as it stood before this sweep from the
+  editor's pre-edit backups - its diff against `6b023b1` matched the
+  session-start `git diff --stat` to the line (42 files, +2280/-450) - as
+  `901d410` on `feat/groq-optimiser-pending-fixes`. This sweep follows on
+  `fix/bug-sweep`: `7b41303` (engine), `af439a6` (server), `aee3d87` (web).
+  Each commit was checked out alone and passed typecheck, lint and tests
+  (195, then 105/78/34, 105/91/34, 105/91/37); `main` is fast-forwarded to
+  the tip. Nothing is pushed - there is no remote (B1).
 
 Tests added (38) - real output (`npm test`):
 ```
