@@ -1307,3 +1307,62 @@ $ npm run typecheck -> exit 0    $ npm run lint -> exit 0
 Anything I deliberately left out:
 - The y-axis labels in this chart wrap and crowd ("₹22.00" over "Cr") because
   the axis is 58px wide; the brief said to leave the axes as they are.
+  (Superseded by the next entry: the axis is now in %.)
+
+## "All goals" plotted as % funded  [done]
+
+**The report:** plotted in rupees, Retirement (₹20.86 Cr) made Emergency Fund,
+Japan Trip and New goal (₹2.9-17 L) practically invisible.
+
+Files touched:
+- `packages/shared/src/finance/goals.ts` — `fundedPercent(projection)`:
+  projected / needed x 100, uncapped, 0 when there is no target. In the engine
+  because it is a calculation (constraint 1), next to `fundedRatio`, which stays
+  capped at 1 because it decides "on track".
+- `packages/web/src/components/charts/Charts.tsx` — `GoalFundingChart`: one
+  bar per goal at its funded %, a value label over every bar in `--text`,
+  rounded tops kept, y-axis 0-100% in 25% steps with "%" labels, a dashed
+  100% `ReferenceLine` in `--border-strong` labelled "100% funded" on the
+  right, `cursor={false}`, and the same tooltip card with the rupee figures
+  (Needed at goal date, Projected, Funded, Years away) read from the row data.
+  The legend drops "Needed at the goal date".
+- `packages/web/src/pages/Goals.tsx` — subtitle "How much of each goal your
+  plan is projected to fund".
+- Tests: `shared/test/engine.test.ts`, `web/test/render.test.tsx`.
+
+Decisions I made without asking:
+- **Bar colour follows the existing status rule**: short goals stay the
+  Projected pink/red (`--negative`), a goal on track keeps the existing green,
+  matching the legend. A 623% goal drawn in "short" red would contradict the
+  100% line beside it.
+- **The axis follows the brief's formula up to 200%** (100%, or the next 25%
+  above the largest goal). Past 200% the step coarsens (50, 100, 250, ...) so
+  there are at most nine labels starting at 0%: at 25% steps a 623% goal
+  meant 26 ticks, which Recharts thinned to "25% 100% 175% ..." and dropped
+  0%. That goal now reads 0-700% in 100% steps.
+- **Bar width capped at 100px** (`maxBarSize`), about what each of the old
+  pair of bars was, so a single bar per goal did not double in width.
+- **The Dashboard's "Goal funding" card gets the same view**; it is the same
+  component, and its subtitle still holds (the tooltip keeps the target amounts).
+- **The Tooltip "Funded" row uses the same uncapped %** as the bar, where it
+  used the capped `fundedRatio`, so the two can never disagree above 100%.
+
+Verified in headless Chrome (Aarav plus an added "New goal"): subtitle; one
+series of four bars labelled 40%, 39%, 50%, 10%; y-axis 0% 25% 50% 75% 100%;
+dashed 100% line with its label, set apart from the gridlines; rounded tops;
+labels in the theme text colour; hovering each of the four goals shows the
+tooltip in rupees with a Funded figure equal to the bar label, no cursor element
+and unchanged bar styles. Raising Japan Trip to 623% stretches the axis to
+0-700%, keeps its label inside the chart and colours it on-track green. The
+Dashboard card shows the same view. No page or console errors.
+
+Tests added (2) - real output:
+```
+ℹ tests 106   ℹ pass 106   ℹ fail 0      (shared - was 105)
+ℹ tests 91    ℹ pass 91    ℹ fail 0      (server)
+ℹ tests 38    ℹ pass 38    ℹ fail 0      (web - was 37)
+$ npm run typecheck -> exit 0    $ npm run lint -> exit 0
+```
+`fundedPercent` is uncapped above 100%, 0 with no target, and equal to
+`fundedRatio` below 100%; the axis helper gives 0-100% in 25% steps, the next
+25% above an over-funded goal, and at most nine labels from 0% far above it.

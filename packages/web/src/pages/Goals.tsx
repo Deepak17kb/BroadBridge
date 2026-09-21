@@ -226,7 +226,7 @@ export function Goals() {
             </Card>
           </div>
 
-          <Card title="All goals" subtitle="Needed at the goal date versus what your plan projects">
+          <Card title="All goals" subtitle="How much of each goal your plan is projected to fund">
             <GoalFundingChart projections={snapshot.goalProjections} currency={currency} />
           </Card>
 

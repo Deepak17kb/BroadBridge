@@ -14,6 +14,7 @@ import { Assumptions } from '../src/pages/Assumptions';
 import { Profile } from '../src/pages/Profile';
 import { Onboarding, checkAges } from '../src/pages/Onboarding';
 import { MoneyInput, NumberInput, withoutLeadingZeros } from '../src/components/ui';
+import { fundedAxis } from '../src/components/charts/Charts';
 
 /**
  * Smoke renders.
@@ -175,4 +176,21 @@ test('entered ages continue only when they make sense', () => {
 
   assert.deepEqual(checkAges({ age: 12, retirementAge: 60 }).problems, ['Enter an age between 16 and 100.']);
   assert.deepEqual(checkAges({ age: 30, retirementAge: 120 }).problems, ['Retirement age can be at most 100.']);
+});
+
+test('the % funded axis is 0-100% in 25% steps and stretches to fit an over-funded goal', () => {
+  assert.deepEqual(fundedAxis(69), { top: 100, ticks: [0, 25, 50, 75, 100] });
+  assert.deepEqual(fundedAxis(0), { top: 100, ticks: [0, 25, 50, 75, 100] });
+  assert.deepEqual(fundedAxis(110).ticks, [0, 25, 50, 75, 100, 125], 'the next 25% step above the goal');
+  assert.deepEqual(fundedAxis(200).ticks.at(-1), 200);
+
+  // Far above 100% the step coarsens, the axis still starts at 0% and ends at
+  // or above the goal, and it never carries more than nine labels.
+  for (const dataMax of [201, 623, 1840, 9999]) {
+    const { top, ticks } = fundedAxis(dataMax);
+    assert.equal(ticks[0], 0);
+    assert.equal(ticks.at(-1), top);
+    assert.ok(top >= dataMax, `${dataMax}% fits under ${top}%`);
+    assert.ok(ticks.length <= 9, `${dataMax}%: ${ticks.length} labels`);
+  }
 });

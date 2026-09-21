@@ -8,7 +8,7 @@ import {
 } from '../src/assumptions.js';
 import { PERSONAS, personaById } from '../src/data/personas.js';
 import { buildSnapshot, runScenario, SCENARIO_PRESETS } from '../src/finance/engine.js';
-import { projectGoal } from '../src/finance/goals.js';
+import { fundedPercent, projectGoal } from '../src/finance/goals.js';
 import { runMonteCarlo } from '../src/finance/montecarlo.js';
 import {
   analyzePortfolio,
@@ -668,6 +668,23 @@ test('a retired profile does not divide by zero in the simulation', () => {
   const impact = computeActionImpact({ profile, topN: 3, now: FIXED_NOW });
   assert.ok(Number.isFinite(impact.before.medianCorpusAtRetirement));
   assert.ok(Number.isFinite(impact.after.medianCorpusAtRetirement));
+});
+
+test('fundedPercent is the uncapped share of the target, and 0 with no target', () => {
+  assert.equal(fundedPercent({ projectedCorpus: 50, inflatedTarget: 200 }), 25);
+  assert.equal(
+    fundedPercent({ projectedCorpus: 260, inflatedTarget: 200 }),
+    130,
+    'an over-funded goal is not capped at 100 the way fundedRatio is',
+  );
+  assert.equal(fundedPercent({ projectedCorpus: 1000, inflatedTarget: 0 }), 0);
+
+  // Below 100% it is the same measure as fundedRatio, on a 0-100 scale.
+  for (const g of buildSnapshot(persona('meera'), FIXED_NOW).goalProjections) {
+    if (g.fundedRatio < 1) {
+      assert.ok(Math.abs(fundedPercent(g) / 100 - g.fundedRatio) < 0.001, `${g.goalName} agrees with fundedRatio`);
+    }
+  }
 });
 
 test('education inflation override is respected', () => {

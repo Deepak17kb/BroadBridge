@@ -139,6 +139,20 @@ export function projectGoal(goal: Goal, opts: ProjectGoalOptions): GoalProjectio
   };
 }
 
+/**
+ * Projected corpus as a percentage of the inflated target, uncapped - a goal
+ * heading for 130% reads 130%, where `fundedRatio` stops at 1 because it
+ * decides "on track". A goal with no target has nothing to fund and reads 0%.
+ * This is what lets goals of very different sizes share one chart scale.
+ */
+export function fundedPercent(
+  projection: Pick<GoalProjection, 'projectedCorpus' | 'inflatedTarget'>,
+): number {
+  return projection.inflatedTarget > 0
+    ? (projection.projectedCorpus / projection.inflatedTarget) * 100
+    : 0;
+}
+
 /** Compact number for assumption strings - currency symbol is added by the UI. */
 function formatPlain(value: number): string {
   const abs = Math.abs(value);

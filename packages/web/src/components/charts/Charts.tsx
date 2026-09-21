@@ -6,6 +6,7 @@ import {
   BarChart,
   CartesianGrid,
   Cell,
+  LabelList,
   Line,
   ReferenceLine,
   ResponsiveContainer,
@@ -17,6 +18,7 @@ import {
   ASSET_CLASSES,
   ASSET_LABELS,
   formatCompact,
+  fundedPercent,
   type AllocationWeights,
   type AssetClass,
   type Currency,
@@ -461,10 +463,25 @@ export function DriftChart({
 /* -------------------------------------------------------------------------- */
 
 /**
- * Projected corpus against the inflated target, per goal.
+ * The % funded axis: 0-100% in 25% steps, extended in 25% steps to fit a goal
+ * above 100%. Past 200% the step coarsens so the axis keeps a handful of clean
+ * labels starting at 0% - at 25% steps a 600% goal meant 25 ticks, which the
+ * chart thinned to an uneven set that dropped the 0% label.
+ */
+export function fundedAxis(dataMax: number): { top: number; ticks: number[] } {
+  const step =
+    dataMax <= 200 ? 25 : ([50, 100, 250, 500, 1000, 2500, 5000].find((s) => Math.ceil(dataMax / s) <= 8) ?? 10_000);
+  const top = Math.max(100, Math.ceil(dataMax / step) * step);
+  return { top, ticks: Array.from({ length: top / step + 1 }, (_, i) => i * step) };
+}
+
+/**
+ * How much of each goal the plan is projected to fund, as a percentage.
  *
- * Two measures on one axis, both in currency, so a single scale is correct -
- * a second y-axis here would be the classic dual-axis mistake.
+ * One scale for every goal. Plotted in rupees, a 20 Cr retirement target
+ * flattened a 3 L trip into an invisible sliver - hiding exactly the nearest
+ * goals. The rupee figures are still one hover away, in the tooltip, and the
+ * axis stretches past 100% in 25% steps when a goal is over-funded.
  */
 export function GoalFundingChart({
   projections,
@@ -478,18 +495,20 @@ export function GoalFundingChart({
   const data = projections.map((p) => ({
     name: p.goalName.length > 17 ? `${p.goalName.slice(0, 16)}…` : p.goalName,
     fullName: p.goalName,
+    fundedPct: fundedPercent(p),
     projected: p.projectedCorpus,
     target: p.inflatedTarget,
     onTrack: p.onTrack,
-    funded: p.fundedRatio,
     years: p.yearsToGoal,
   }));
+  const { top, ticks } = fundedAxis(Math.max(0, ...data.map((d) => d.fundedPct)));
 
   return (
     <div>
       <div className="chart-frame" style={{ height }}>
         <ResponsiveContainer width="100%" height="100%">
-          <BarChart data={data} margin={{ top: 6, right: 12, left: 4, bottom: 4 }} barGap={2}>
+          {/* Top margin leaves room for the value label over a bar that reaches the top. */}
+          <BarChart data={data} margin={{ top: 20, right: 12, left: 4, bottom: 4 }}>
             <CartesianGrid stroke="var(--grid)" strokeDasharray="0" vertical={false} />
             <XAxis dataKey="name" tick={{ ...AXIS, fontFamily: 'var(--font)' }} tickLine={false} axisLine={{ stroke: 'var(--grid)' }} />
             <YAxis
@@ -497,7 +516,10 @@ export function GoalFundingChart({
               tickLine={false}
               axisLine={false}
               width={58}
-              tickFormatter={(v: number) => formatCompact(v, currency)}
+              domain={[0, top]}
+              ticks={ticks}
+              interval={0}
+              tickFormatter={(v: number) => `${v}%`}
             />
             <Tooltip
               // No hover highlight at all - only the tooltip card. Recharts
@@ -513,28 +535,44 @@ export function GoalFundingChart({
                     rows={[
                       { name: 'Needed at goal date', value: formatCompact(d.target, currency), colour: 'var(--text-subtle)' },
                       { name: 'Projected', value: formatCompact(d.projected, currency), colour: d.onTrack ? 'var(--positive)' : 'var(--negative)' },
-                      { name: 'Funded', value: `${(d.funded * 100).toFixed(0)}%` },
+                      { name: 'Funded', value: `${Math.round(d.fundedPct)}%` },
                       { name: 'Years away', value: d.years.toFixed(1) },
                     ]}
                   />
                 );
               }}
             />
-            {/* The target is context, so it sits in a recessive grey; the
-                projection is the subject and carries the status colour. */}
-            <Bar dataKey="target" fill="var(--border-strong)" radius={[4, 4, 0, 0]} isAnimationActive={false} name="Needed" />
-            <Bar dataKey="projected" radius={[4, 4, 0, 0]} isAnimationActive={false} name="Projected">
+            <ReferenceLine
+              y={100}
+              stroke="var(--border-strong)"
+              strokeDasharray="4 4"
+              label={{
+                value: '100% funded',
+                position: 'insideTopRight',
+                fill: 'var(--text-subtle)',
+                fontSize: 10,
+              }}
+            />
+            {/* One bar per goal in the status colour. Its width is capped near
+                what each of the old pair of bars was, so the chart keeps its weight. */}
+            <Bar dataKey="fundedPct" radius={[4, 4, 0, 0]} maxBarSize={100} isAnimationActive={false} name="Funded">
               {data.map((d, i) => (
                 <Cell key={i} fill={d.onTrack ? 'var(--positive)' : 'var(--negative)'} />
               ))}
+              {/* A value on every bar, so a 2% goal is as readable as a 69% one. */}
+              <LabelList
+                dataKey="fundedPct"
+                position="top"
+                formatter={(v: number) => `${Math.round(v)}%`}
+                fill="var(--text)"
+                fontSize={11}
+                fontFamily="var(--font-mono)"
+              />
             </Bar>
           </BarChart>
         </ResponsiveContainer>
       </div>
       <div className="legend" style={{ marginTop: 8 }}>
-        <span className="legend-item">
-          <span className="dot" style={{ background: 'var(--border-strong)' }} /> Needed at the goal date
-        </span>
         <span className="legend-item">
           <span className="dot" style={{ background: 'var(--positive)' }} /> Projected - on track
         </span>
