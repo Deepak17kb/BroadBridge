@@ -18,11 +18,19 @@ const LOCALE = 'en-IN';
  */
 export function formatCompact(value: number, _currency: Currency = 'INR'): string {
   const abs = Math.abs(value);
-  const sign = value < 0 ? '-' : '';
-  if (abs >= 1e7) return `${sign}${SYMBOL}${(abs / 1e7).toFixed(2)} Cr`;
-  if (abs >= 1e5) return `${sign}${SYMBOL}${(abs / 1e5).toFixed(2)} L`;
-  if (abs >= 1e3) return `${sign}${SYMBOL}${(abs / 1e3).toFixed(1)}k`;
-  return `${sign}${SYMBOL}${abs.toFixed(0)}`;
+  /*
+   * Units are chosen on the value as it will be *shown*, so a figure that
+   * rounds up into the next unit is written in that unit: 99,999.6 is
+   * "₹1.00 L", not "₹100.0k", and 9,999,999 is "₹1.00 Cr", not "₹100.00 L".
+   * A value that rounds to zero carries no sign.
+   */
+  let body: string;
+  if (abs >= 1e7 || Number((abs / 1e5).toFixed(2)) >= 100) body = `${(abs / 1e7).toFixed(2)} Cr`;
+  else if (abs >= 1e5 || Number((abs / 1e3).toFixed(1)) >= 100) body = `${(abs / 1e5).toFixed(2)} L`;
+  else if (abs >= 1e3 || Math.round(abs) >= 1000) body = `${(abs / 1e3).toFixed(1)}k`;
+  else body = abs.toFixed(0);
+  const sign = value < 0 && Number(body.replace(/[^\d.]/g, '')) !== 0 ? '-' : '';
+  return `${sign}${SYMBOL}${body}`;
 }
 
 export function formatCurrency(value: number, _currency: Currency = 'INR', dp = 0): string {
@@ -43,9 +51,12 @@ export function formatNumber(value: number, _currency: Currency = 'INR'): string
 }
 
 export function formatYears(years: number): string {
-  if (years < 1) return `${Math.round(years * 12)} months`;
-  const whole = Math.floor(years);
-  const months = Math.round((years - whole) * 12);
+  // Rounded to whole months first, so 1.99 years reads "2 years" rather than
+  // the impossible "1y 12m", and 0.999 reads "1 year" rather than "12 months".
+  const totalMonths = Math.round(years * 12);
+  if (totalMonths < 12) return `${totalMonths} months`;
+  const whole = Math.floor(totalMonths / 12);
+  const months = totalMonths % 12;
   if (months === 0) return `${whole} year${whole === 1 ? '' : 's'}`;
   return `${whole}y ${months}m`;
 }

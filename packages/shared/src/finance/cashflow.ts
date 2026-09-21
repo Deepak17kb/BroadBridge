@@ -95,6 +95,12 @@ export interface RetirementInput {
   shockYear?: number;
   /** Months during which contributions stop (career break). */
   skipMonths?: number;
+  /**
+   * Part of the free surplus the caller has already committed elsewhere - a
+   * scenario's expense cut that it deploys to goals - so it is not also counted
+   * as habitual saving. Without this the same rupee was invested twice.
+   */
+  surplusCommitted?: number;
 }
 
 /**
@@ -132,7 +138,8 @@ export function assessRetirement(input: RetirementInput): RetirementReadiness {
   );
   const cashflow = summariseCashflow(profile, assumptions, input.expenseMultiplier ?? 1);
   // Half of any free surplus is assumed to keep flowing to long-term investing.
-  const habitualSaving = Math.max(0, cashflow.monthlySurplus) * 0.5;
+  const habitualSaving =
+    Math.max(0, cashflow.monthlySurplus - Math.max(0, input.surplusCommitted ?? 0)) * 0.5;
   const monthlyToRetirement =
     retirementGoalContribution + habitualSaving + (input.extraMonthly ?? 0);
 
@@ -164,7 +171,10 @@ export function assessRetirement(input: RetirementInput): RetirementReadiness {
   let corpus = projectedCorpus;
   let spend = targetAnnualSpend;
   let depletionAge: number | null = null;
-  for (let age = retirementAge; age < 100; age++) {
+  // Drawdown starts now for someone already past their retirement age -
+  // counting from a retirement age in the past reported a depletion age
+  // years too early (and, for a scenario lever, one before today).
+  for (let age = Math.max(retirementAge, profile.age); age < 100; age++) {
     corpus = (corpus - spend) * (1 + postRetirementReturn);
     spend *= 1 + assumptions.inflationPct;
     if (corpus <= 0) {
@@ -269,9 +279,18 @@ export function planDebtPayoff(
       if (debt.balance <= 0.5 || diverged.has(debt.id)) continue;
       const i = monthlyRate(debt.interestRatePct);
       const interest = debt.balance * i;
-      let payment = debt.emi;
-      if (snowball > 0) {
-        const extra = Math.min(snowball, debt.balance + interest);
+      const due = debt.balance + interest;
+      /*
+       * Never pay more than is owed. In a debt's final month the part of its
+       * EMI it no longer needs rolls on to the next debt, and the extra only
+       * tops up what the EMI leaves outstanding. Paying EMI + extra against the
+       * full balance threw the surplus away every time a debt cleared - a
+       * 5,000 EMI on a 100 balance lost 4,900 that month.
+       */
+      let payment = Math.min(debt.emi, due);
+      snowball += debt.emi - payment;
+      if (snowball > 0 && payment < due) {
+        const extra = Math.min(snowball, due - payment);
         payment += extra;
         snowball -= extra;
       }

@@ -15,6 +15,7 @@ import type {
   RiskProfile,
   UserProfile,
 } from '../types.js';
+import { assessRetirement } from './cashflow.js';
 import { clamp, futureValueLumpSum, round, sum } from './math.js';
 
 export interface ActionContext {
@@ -546,7 +547,13 @@ export function generateActions(ctx: ActionContext): NextBestAction[] {
         inflation: assumptions.inflationPct,
         'horizon years': years,
       },
-      apply: { type: 'set_allocation', weights: ctx.recommendedAllocation },
+      // The idle lump moves into the portfolio as part of applying this. The
+      // monthly half is a habit, not a one-off edit, so it stays with the user.
+      apply: {
+        type: 'set_allocation',
+        weights: ctx.recommendedAllocation,
+        ...(lumpIsIdle ? { fundFromCash: round(excessCash, 0) } : {}),
+      },
     });
   }
 
@@ -817,6 +824,17 @@ export function generateActions(ctx: ActionContext): NextBestAction[] {
 
   /* 11. Retirement gap. ------------------------------------------------------ */
   if (retirement.readinessRatio < 0.9 && retirement.monthlyGap > 0) {
+    /*
+     * How much longer to work, from the engine rather than a rule of thumb.
+     * The step used to say "work min(5, ceil(10 x shortfall)) more years",
+     * which told Meera four years when the projection needs ten and told
+     * Aarav five when five years only takes him from 41% to 54% funded.
+     */
+    const extraYears = extraWorkingYearsToFund(
+      profile,
+      assumptions,
+      retirement.plan.expectedReturnPct,
+    );
     actions.push({
       id: 'close-retirement-gap',
       title: `Add ${fmt(retirement.monthlyGap)}/month towards retirement`,
@@ -831,7 +849,9 @@ export function generateActions(ctx: ActionContext): NextBestAction[] {
       priorityScore: clamp(55 + (1 - retirement.readinessRatio) * 30, 45, 90),
       steps: [
         `Increase long-term investing by ${fmt(retirement.monthlyGap)}/month.`,
-        `Or work ${Math.min(5, Math.ceil((1 - retirement.readinessRatio) * 10))} more years - delaying retirement shortens the drawdown and lengthens the accumulation, so it moves the number twice.`,
+        extraYears !== null
+          ? `Or work ${extraYears} more year${extraYears === 1 ? '' : 's'} - at your current saving that fully funds it, because delaying retirement shortens the drawdown and lengthens the accumulation, so it moves the number twice.`
+          : `Working longer alone does not close it: even ${MAX_EXTRA_WORKING_YEARS} more years at your current saving leaves a shortfall, so it has to be combined with saving more or spending less.`,
         'Or plan to spend less in retirement - a 10% lower spend cuts the required corpus by 10%.',
         'Use the Scenario Lab to see which of these three you can actually live with.',
       ],
@@ -844,6 +864,9 @@ export function generateActions(ctx: ActionContext): NextBestAction[] {
         'retirement annual spend': retirement.targetAnnualSpend,
         'retirement readiness': retirement.readinessRatio,
         ...(retirement.depletionAge ? { 'depletion age': retirement.depletionAge } : {}),
+        ...(extraYears !== null
+          ? { 'extra working years to fully fund': extraYears }
+          : { 'extra working years searched': MAX_EXTRA_WORKING_YEARS }),
       },
     });
   }
@@ -888,6 +911,27 @@ export function generateActions(ctx: ActionContext): NextBestAction[] {
   }
 
   return actions.sort((a, b) => b.priorityScore - a.priorityScore);
+}
+
+/** How far the extra-working-years search looks before saying work alone will not do it. */
+const MAX_EXTRA_WORKING_YEARS = 10;
+
+/**
+ * The fewest extra working years that take retirement to fully funded, holding
+ * today's saving and the plan's return fixed. `null` when none within
+ * `MAX_EXTRA_WORKING_YEARS` (or before age 100) does.
+ */
+function extraWorkingYearsToFund(
+  profile: UserProfile,
+  assumptions: MarketAssumptions,
+  expectedReturnPct: number,
+): number | null {
+  for (let extra = 1; extra <= MAX_EXTRA_WORKING_YEARS; extra++) {
+    if (profile.retirementAge + extra > 100) break;
+    const later = assessRetirement({ profile, assumptions, expectedReturnPct, retirementAgeDelta: extra });
+    if (later.readinessRatio >= 1) return extra;
+  }
+  return null;
 }
 
 /** FV of a unit monthly contribution with an annual step-up, in whole years. */

@@ -60,13 +60,24 @@ export function returnForGoal(
   assumptions: MarketAssumptions,
   now = new Date(),
 ): number {
-  const risk = scoreRisk(profile);
-  const years = yearsToGoal(goal.targetYear, now);
-  const allocation =
-    goal.kind === 'emergency'
-      ? ({ ...normaliseWeights({ ...zero(), cash: 0.7, debt: 0.3 }) } as AllocationWeights)
-      : recommendAllocation(risk.bucket, years);
-  return portfolioExpectedReturn(allocation, assumptions);
+  return portfolioExpectedReturn(allocationForGoal(goal, profile, now), assumptions);
+}
+
+/**
+ * The mix the money for one goal is held in. Exported so a simulation of the
+ * goal draws its volatility from the same mix its projection takes its return
+ * from - the Goals page used the risk bucket's mix for every goal, so an
+ * emergency fund projected at a cash return was simulated as an equity book.
+ */
+export function allocationForGoal(
+  goal: Goal,
+  profile: UserProfile,
+  now = new Date(),
+): AllocationWeights {
+  if (goal.kind === 'emergency') {
+    return { ...normaliseWeights({ ...zero(), cash: 0.7, debt: 0.3 }) } as AllocationWeights;
+  }
+  return recommendAllocation(scoreRisk(profile).bucket, yearsToGoal(goal.targetYear, now));
 }
 
 function zero(): AllocationWeights {
@@ -170,12 +181,24 @@ export interface RunScenarioOptions {
  */
 export function runScenario(opts: RunScenarioOptions): ScenarioResult {
   const now = opts.now ?? new Date();
-  const { profile, levers } = opts;
+  const { profile } = opts;
+  /*
+   * A crash with no year is modelled in year 1 - the year the label and the
+   * narration have always described it in. Left undefined, every projection
+   * below skipped the shock entirely while the explanation reported one.
+   */
+  const levers: ScenarioLevers =
+    opts.levers.marketShockPct !== undefined && opts.levers.shockYear === undefined
+      ? { ...opts.levers, shockYear: 1 }
+      : opts.levers;
   const baseline = opts.baseline ?? buildSnapshot(profile, now);
   const baseAssumptions = resolveAssumptions(profile);
-  const assumptions: MarketAssumptions = levers.inflationPct
-    ? { ...baseAssumptions, inflationPct: levers.inflationPct }
-    : baseAssumptions;
+  // `!== undefined`, not truthiness: 0% inflation is a legitimate what-if, and
+  // treating it as "unset" labelled the scenario 0% while computing it at 6%.
+  const assumptions: MarketAssumptions =
+    levers.inflationPct !== undefined
+      ? { ...baseAssumptions, inflationPct: levers.inflationPct }
+      : baseAssumptions;
 
   const risk = scoreRisk(profile);
   const retirementAge = profile.retirementAge + (levers.retirementAgeDelta ?? 0);
@@ -208,9 +231,10 @@ export function runScenario(opts: RunScenarioOptions): ScenarioResult {
           )
         : profile.cashflow.monthlyExpenses,
     },
-    assumptionOverrides: levers.inflationPct
-      ? { ...profile.assumptionOverrides, inflationPct: levers.inflationPct }
-      : profile.assumptionOverrides,
+    assumptionOverrides:
+      levers.inflationPct !== undefined
+        ? { ...profile.assumptionOverrides, inflationPct: levers.inflationPct }
+        : profile.assumptionOverrides,
   };
 
   const cashflow = summariseCashflow(scenarioProfile, assumptions);
@@ -218,7 +242,9 @@ export function runScenario(opts: RunScenarioOptions): ScenarioResult {
   // of whatever the user explicitly added.
   const expenseSaving =
     totalMonthlyExpenses(profile) - totalMonthlyExpenses(profile, levers.expenseMultiplier ?? 1);
-  const extraMonthly = (levers.extraMonthlySavings ?? 0) + Math.max(0, expenseSaving);
+  const freedSpending = Math.max(0, expenseSaving);
+  const extraMonthly = (levers.extraMonthlySavings ?? 0) + freedSpending;
+  const lumpSum = levers.lumpSum ?? 0;
 
   // Extra savings are split across off-track goals in proportion to their gap,
   // which mirrors how a planner would actually deploy new money.
@@ -230,21 +256,37 @@ export function runScenario(opts: RunScenarioOptions): ScenarioResult {
     }),
   );
   const totalGap = sum(baseProjections.map((p) => p.monthlyGap));
+  const shareOf = (goal: Goal): number => {
+    const base = baseProjections.find((p) => p.goalId === goal.id);
+    return totalGap > 0 && base ? base.monthlyGap / totalGap : 1 / Math.max(1, profile.goals.length);
+  };
+
+  /*
+   * The new money is invested once. Retirement-kind goals are already counted
+   * as retirement saving by `assessRetirement`, so the retirement projection
+   * receives exactly the share of the pool the split sends to them - or all of
+   * it when there are no goals to split across. It used to receive the whole
+   * explicit saving and lump sum on top of the goals receiving the same money,
+   * which credited "save 5,000 more" with 10,000 of investing.
+   */
+  const retirementShare =
+    profile.goals.length === 0
+      ? 1
+      : sum(profile.goals.filter((g) => g.kind === 'retirement').map(shareOf));
 
   const goalProjections = profile.goals
     .map((goal) => {
-      const base = baseProjections.find((p) => p.goalId === goal.id);
-      const share = totalGap > 0 && base ? base.monthlyGap / totalGap : 1 / Math.max(1, profile.goals.length);
+      const share = shareOf(goal);
       return projectGoal(goal, {
-        annualReturn: levers.allocation
-          ? portfolioExpectedReturn(
-              recommendAllocation(risk.bucket, yearsToGoal(goal.targetYear, now)),
-              assumptions,
-            )
-          : returnForGoal(goal, profile, assumptions, now),
+        // A custom allocation lever applies to the retirement portfolio. Goal
+        // money stays in the mix its own horizon calls for, exactly as in the
+        // baseline - this branch used the risk bucket's mix instead, which
+        // re-priced the emergency fund at equity returns whenever any
+        // allocation was chosen, even the recommended one.
+        annualReturn: returnForGoal(goal, profile, assumptions, now),
         assumptions,
         extraMonthly: extraMonthly * share,
-        lumpSum: (levers.lumpSum ?? 0) * share,
+        lumpSum: lumpSum * share,
         skipMonths: levers.careerBreakMonths,
         shockPct: levers.marketShockPct,
         shockYear: levers.shockYear,
@@ -254,15 +296,20 @@ export function runScenario(opts: RunScenarioOptions): ScenarioResult {
     .sort((a, b) => a.yearsToGoal - b.yearsToGoal);
 
   const retirement = assessRetirement({
+    // `scenarioProfile` already carries the shifted retirement age. Passing
+    // `retirementAgeDelta` as well applied it twice: "retire 5 years earlier"
+    // was modelled as ten.
     profile: scenarioProfile,
     assumptions,
     expectedReturnPct: expectedReturn,
-    extraMonthly: levers.extraMonthlySavings ?? 0,
-    retirementAgeDelta: levers.retirementAgeDelta,
-    lumpSum: levers.lumpSum,
+    extraMonthly: extraMonthly * retirementShare,
+    lumpSum: lumpSum * retirementShare,
     shockPct: levers.marketShockPct,
     shockYear: levers.shockYear,
     skipMonths: levers.careerBreakMonths,
+    // The freed spending is deployed through the split above, so it must not
+    // also count towards the half of free surplus assumed to be invested.
+    surplusCommitted: freedSpending,
   });
 
   const goalsOnTrack = goalProjections.filter((g) => g.onTrack).length;
@@ -302,6 +349,9 @@ export function runScenario(opts: RunScenarioOptions): ScenarioResult {
     inflationPct: assumptions.inflationPct,
     shockPct: levers.marketShockPct,
     shockYear: levers.shockYear,
+    // The projection pauses contributions for a career break; the simulation
+    // has to as well, or its success probability ignores the lever entirely.
+    skipMonths: levers.careerBreakMonths,
   });
 
   const snapshot = {
@@ -339,7 +389,10 @@ export function runScenario(opts: RunScenarioOptions): ScenarioResult {
       },
       {
         label: 'Extra savings deployment',
-        value: 'Split across off-track goals in proportion to each shortfall',
+        value:
+          profile.goals.length === 0
+            ? 'Added to retirement saving - there are no goals to split it across'
+            : 'Split across off-track goals in proportion to each shortfall; retirement receives only the share that lands in retirement goals, so no rupee is counted twice',
         source: 'model_default',
       },
       {

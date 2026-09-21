@@ -175,9 +175,13 @@ export function accumulate(input: AccumulationInput): number {
   const afterShock = atShock * (1 + input.shockPct);
   // Contributions resume at whatever level the step-up had reached by the shock.
   const contributionAtShock = monthlyContribution * Math.pow(1 + stepUpPct, Math.floor(shockYear));
+  // A career break that outlasts the shock keeps pausing contributions after
+  // it. Dropping the remainder here credited a 36-month break with a year's
+  // contributions whenever a crash landed in year one.
+  const skipAfterShock = Math.max(0, skipMonths - Math.round(shockYear * 12));
   return (
     futureValueLumpSum(afterShock, annualReturn, yearsAfter) +
-    contributionAtShock * steppedAnnuityFactor(annualReturn, yearsAfter, stepUpPct)
+    contributionAtShock * steppedAnnuityFactor(annualReturn, yearsAfter, stepUpPct, skipAfterShock)
   );
 }
 

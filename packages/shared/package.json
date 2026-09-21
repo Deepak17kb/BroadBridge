@@ -9,7 +9,7 @@
     ".": "./src/index.ts"
   },
   "scripts": {
-    "test": "node --import tsx --test test/math.test.ts test/engine.test.ts test/optimiser.test.ts test/inr.test.ts test/actions-merged.test.ts",
+    "test": "node --import tsx --test test/math.test.ts test/engine.test.ts test/optimiser.test.ts test/inr.test.ts test/actions-merged.test.ts test/regressions.test.ts",
     "typecheck": "tsc --noEmit -p ."
   }
 }

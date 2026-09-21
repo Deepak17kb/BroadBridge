@@ -11,6 +11,7 @@ import { planDebtPayoff } from './finance/cashflow.js';
 import { runMonteCarlo } from './finance/montecarlo.js';
 import { applyActionMutation } from './finance/mutations.js';
 import { round } from './finance/math.js';
+import { portfolioVolatility } from './finance/portfolio.js';
 
 /**
  * What following the advice is actually worth.
@@ -116,7 +117,14 @@ function metricsFor(profile: UserProfile, snapshot: FinancialSnapshot): ImpactMe
           contributionStepUpPct: plan.stepUpPct,
           years: plan.years,
           expectedReturnPct: plan.expectedReturnPct,
-          volatilityPct: snapshot.portfolio.volatilityPct,
+          /*
+           * The volatility of the mix the plan's return comes from. Pairing the
+           * recommended mix's return with the *current* holdings' volatility
+           * let a rebalance move the median through volatility alone - a
+           * swing of tens of lakhs either way that no expected-return change
+           * backed, contradicting the explanation printed beside it.
+           */
+          volatilityPct: portfolioVolatility(snapshot.recommendedAllocation, snapshot.assumptions),
           target: snapshot.retirement.corpusRequired,
           paths: IMPACT_PATHS,
           seed: IMPACT_SEED,
@@ -276,7 +284,13 @@ export function computeActionImpact(input: ComputeActionImpactInput): ActionImpa
       {
         label: 'Why a figure here can be negative',
         value:
-          'The corpus figure is the median outcome. A higher-volatility mix raises the expected return and the upside while lowering the median, so an action that is right on expectation can still show a negative median contribution',
+          'The retirement projection assumes half of any free surplus is invested. Money an action commits to another goal leaves that surplus, so funding a goal can lower the retirement figure even while it closes the goal',
+        source: 'model_default',
+      },
+      {
+        label: 'Portfolio mix',
+        value:
+          'The simulation uses the return and volatility of the recommended mix, the same mix the funded percentage is computed from - rebalancing changes the portfolio, not the plan the projection already assumes',
         source: 'model_default',
       },
       {

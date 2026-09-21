@@ -381,7 +381,17 @@ export interface NextBestAction {
     | { type: 'increase_goal_contribution'; goalId: string; amount: number }
     | { type: 'set_emergency_fund'; amount: number }
     | { type: 'rebalance_to_target' }
-    | { type: 'set_allocation'; weights: AllocationWeights }
+    | {
+        type: 'set_allocation';
+        weights: AllocationWeights;
+        /**
+         * Cash moved from liquid savings into the portfolio before it is
+         * restated at `weights` - the "put idle cash to work" half of the
+         * action. Without it, applying that action rebalanced the holdings and
+         * left the idle cash exactly where it was.
+         */
+        fundFromCash?: number;
+      }
     /**
      * Sets several goal contributions at once, as the optimiser's split.
      *

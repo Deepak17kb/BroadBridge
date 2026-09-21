@@ -19,6 +19,8 @@ export interface MonteCarloInput {
   /** One-off proportional shock, e.g. -0.35, applied at `shockYear`. */
   shockPct?: number;
   shockYear?: number;
+  /** Months at the start with no contribution (career break), as in `accumulate`. */
+  skipMonths?: number;
 }
 
 /**
@@ -36,34 +38,54 @@ export interface MonteCarloInput {
 export function runMonteCarlo(input: MonteCarloInput): MonteCarloResult {
   const paths = Math.max(200, Math.min(20000, input.paths ?? 2000));
   const seed = input.seed ?? 20260920;
-  const years = Math.max(1, Math.ceil(input.years));
-  const months = years * 12;
+  /*
+   * The horizon is simulated in whole months, not rounded up to whole years.
+   * Rounding up ran a goal due in 1.3 years for two full years of growth and
+   * contributions against a target inflated for 1.3, which overstated the
+   * success probability of exactly the near-term goals it matters most for.
+   */
+  const months = Math.max(1, Math.round(input.years * 12));
+  const horizonYears = months / 12;
+  // One checkpoint per whole year, plus the exact horizon when it falls mid-year.
+  const checkpoints = Array.from({ length: Math.floor(months / 12) }, (_, i) => (i + 1) * 12);
+  if (months % 12 !== 0) checkpoints.push(months);
+  const checkpointRow = new Map(checkpoints.map((month, idx) => [month, idx]));
 
   const rng = createRng(seed);
   const normal = createNormalSampler(rng);
 
   const sigmaMonthly = input.volatilityPct / Math.sqrt(12);
   const muMonthly = Math.log(1 + input.expectedReturnPct) / 12 - (sigmaMonthly * sigmaMonthly) / 2;
+  /*
+   * The shock lands at the same moment `accumulate` applies it: after month
+   * `shockYear * 12` has finished, so a shock in year 3 hits the corpus at the
+   * end of month 36 and one at the horizon hits the final value. This used to
+   * fire a month late, which meant a crash in the final year of accumulation -
+   * the worst case the deterministic projection models - was never applied.
+   */
   const shockMonth =
     input.shockPct !== undefined && input.shockYear !== undefined
       ? Math.round(input.shockYear * 12)
-      : -1;
+      : null;
+  const skipMonths = Math.max(0, Math.round(input.skipMonths ?? 0));
 
-  // yearlyValues[y] holds every path's corpus at the end of year y+1.
-  const yearlyValues: number[][] = Array.from({ length: years }, () => new Array(paths).fill(0));
+  // rows[c] holds every path's corpus at checkpoint c.
+  const rows: number[][] = checkpoints.map(() => new Array(paths).fill(0));
   const terminal = new Array<number>(paths);
 
   for (let p = 0; p < paths; p++) {
     let corpus = input.startingCorpus;
+    // A shock at or before time zero lands before anything compounds.
+    if (shockMonth !== null && shockMonth <= 0) corpus *= 1 + (input.shockPct ?? 0);
     let contribution = input.monthlyContribution;
     for (let m = 0; m < months; m++) {
       if (m > 0 && m % 12 === 0) contribution *= 1 + input.contributionStepUpPct;
       const growth = Math.exp(muMonthly + sigmaMonthly * normal());
-      corpus = corpus * growth + contribution;
-      if (m === shockMonth && input.shockPct !== undefined) corpus *= 1 + input.shockPct;
-      if ((m + 1) % 12 === 0) {
-        const yearIdx = (m + 1) / 12 - 1;
-        const row = yearlyValues[yearIdx];
+      corpus = corpus * growth + (m < skipMonths ? 0 : contribution);
+      if (shockMonth !== null && m + 1 === shockMonth) corpus *= 1 + (input.shockPct ?? 0);
+      const rowIdx = checkpointRow.get(m + 1);
+      if (rowIdx !== undefined) {
+        const row = rows[rowIdx];
         if (row) row[p] = corpus;
       }
     }
@@ -73,11 +95,11 @@ export function runMonteCarlo(input: MonteCarloInput): MonteCarloResult {
   const deflator = (year: number) =>
     input.inflationPct ? Math.pow(1 + input.inflationPct, -year) : 1;
 
-  const bands: MonteCarloBand[] = yearlyValues.map((values, idx) => {
-    const year = idx + 1;
-    const d = deflator(year);
+  const bands: MonteCarloBand[] = rows.map((values, idx) => {
+    const yearsIn = (checkpoints[idx] ?? months) / 12;
+    const d = deflator(yearsIn);
     return {
-      year,
+      year: round(yearsIn, 2),
       p10: round(percentile(values, 0.1) * d, 0),
       p25: round(percentile(values, 0.25) * d, 0),
       p50: round(percentile(values, 0.5) * d, 0),
@@ -87,7 +109,7 @@ export function runMonteCarlo(input: MonteCarloInput): MonteCarloResult {
   });
 
   const successes = terminal.filter((v) => v >= input.target).length;
-  const finalDeflator = deflator(years);
+  const finalDeflator = deflator(horizonYears);
 
   // 16 equal-width buckets between the 2nd and 98th percentile keeps the
   // histogram readable - a raw min/max range is dominated by one lucky path.
@@ -122,6 +144,24 @@ export function runMonteCarlo(input: MonteCarloInput): MonteCarloResult {
       value: 'Variance drag (-σ²/2) removed so the mean simulated return matches the stated expected return',
       source: 'model_default',
     },
+    ...(shockMonth !== null && input.shockPct
+      ? [
+          {
+            label: 'Simulated shock',
+            value: `${(input.shockPct * 100).toFixed(0)}% one-off move at year ${input.shockYear}, on every path`,
+            source: 'user_input' as const,
+          },
+        ]
+      : []),
+    ...(skipMonths > 0
+      ? [
+          {
+            label: 'Contribution pause',
+            value: `No contributions for the first ${skipMonths} months, on every path`,
+            source: 'user_input' as const,
+          },
+        ]
+      : []),
     {
       label: 'Reported in',
       value: input.inflationPct
