@@ -19,6 +19,7 @@ import {
 } from '@wealth/shared';
 import { config } from '../config.js';
 import { asyncHandler, notFound, parseBody } from '../lib/http.js';
+import { leverSchema } from '../lib/levers.js';
 import { getStore } from '../store/index.js';
 
 /**
@@ -31,19 +32,6 @@ import { getStore } from '../store/index.js';
  */
 
 export const router = Router();
-
-const leverSchema = z.object({
-  extraMonthlySavings: z.number().min(0).max(10_000_000).optional(),
-  expenseMultiplier: z.number().min(0.1).max(3).optional(),
-  retirementAgeDelta: z.number().int().min(-30).max(30).optional(),
-  allocation: z.record(z.string(), z.number().min(0).max(1)).optional(),
-  incomeGrowthPct: z.number().min(0).max(1).optional(),
-  lumpSum: z.number().min(0).max(1_000_000_000).optional(),
-  marketShockPct: z.number().min(-0.9).max(0.9).optional(),
-  shockYear: z.number().min(0).max(60).optional(),
-  careerBreakMonths: z.number().int().min(0).max(120).optional(),
-  inflationPct: z.number().min(0).max(0.5).optional(),
-});
 
 router.get(
   '/presets',

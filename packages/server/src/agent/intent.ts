@@ -44,7 +44,7 @@ const RULES: IntentRule[] = [
       'if i invest', 'if i retire', 'if the market', 'career break', 'lump sum',
       'should i save more', 'can i afford to',
     ],
-    words: ['scenario', 'crash', 'shock', 'bonus', 'sabbatical'],
+    words: ['scenario', 'crash', 'crashes', 'crashed', 'shock', 'bonus', 'sabbatical'],
   },
   {
     intent: 'compare',
@@ -160,8 +160,10 @@ export function classifyIntent(message: string): { intent: Intent; confidence: n
 /** Numbers the user mentioned, used to pre-fill scenario levers. */
 export function extractNumbers(message: string): number[] {
   const out: number[] = [];
-  // Matches 5000, 5,000, 5k, 2 lakh, 1.5 cr, 3 crore
-  const re = /(\d[\d,]*(?:\.\d+)?)\s*(k|lakh|lakhs|lac|l\b|cr|crore|crores|m\b)?/gi;
+  // Matches 5000, 5,000, 5k, 2 lakh, 1.5 cr, 3 crore. Every unit must end at a
+  // word boundary: without it "2 kids" read as 2,000, "2 credit cards" as
+  // 2 crore, and "a 2008 crash" as a 2,008-crore lump sum.
+  const re = /(\d[\d,]*(?:\.\d+)?)\s*(k\b|lakhs?\b|lacs?\b|l\b|cr\b|crores?\b|m\b)?/gi;
   let match: RegExpExecArray | null;
   while ((match = re.exec(message)) !== null) {
     const base = Number.parseFloat((match[1] ?? '').replace(/,/g, ''));
@@ -169,7 +171,7 @@ export function extractNumbers(message: string): number[] {
     const unit = (match[2] ?? '').toLowerCase();
     let value = base;
     if (unit === 'k') value = base * 1_000;
-    else if (['lakh', 'lakhs', 'lac', 'l'].includes(unit)) value = base * 100_000;
+    else if (['lakh', 'lakhs', 'lac', 'lacs', 'l'].includes(unit)) value = base * 100_000;
     else if (['cr', 'crore', 'crores'].includes(unit)) value = base * 10_000_000;
     else if (unit === 'm') value = base * 1_000_000;
     out.push(value);
@@ -186,11 +188,18 @@ export function inferLevers(message: string, profile: UserProfile): Record<strin
   const numbers = extractNumbers(message);
   const levers: Record<string, number> = {};
 
-  const savingAmount = numbers.find((n) => n >= 500 && n <= profile.cashflow.monthlyNetIncome * 2);
+  // A four-digit year ("in 2030") is not an amount when a real one is present.
+  const amounts = numbers.filter((n) => n >= 500);
+  const savingAmount =
+    amounts.find((n) => !(Number.isInteger(n) && n >= 1900 && n <= 2100)) ?? amounts[0];
   if (/\b(save|saving|invest|investing|put away|contribute)\b/.test(text) && savingAmount) {
-    // A large figure with no "per month" wording reads as a lump sum.
+    // A large figure with no "per month" wording reads as a lump sum. Only a
+    // monthly figure is capped by income: the cap used to apply to both, so
+    // "what if I invest 2 lakh" was dropped and answered as 5,000 a month.
     if (/\b(a month|per month|monthly|every month|\/month|pm)\b/.test(text) || savingAmount < 100_000) {
-      levers.extraMonthlySavings = savingAmount;
+      if (savingAmount <= profile.cashflow.monthlyNetIncome * 2) {
+        levers.extraMonthlySavings = savingAmount;
+      }
     } else {
       levers.lumpSum = savingAmount;
     }
@@ -227,15 +236,32 @@ export function inferLevers(message: string, profile: UserProfile): Record<strin
     levers.retirementAgeDelta = yearsMentioned ?? 3;
   }
 
-  if (/\b(crash|correction|downturn|bear market|recession|market fall|drawdown|2008|covid)\b/.test(text)) {
+  // Every form of the word: "crash" alone missed "the market crashes", which
+  // then fell through to the default 5,000-a-month answer.
+  if (
+    /\b(crash\w*|corrections?|downturns?|bear market|recession|market (?:falls?|fell|drops?|dropped)|drawdowns?|2008|covid)\b/.test(
+      text,
+    )
+  ) {
     const shockPct = numbers.find((n) => n >= 5 && n <= 80);
     levers.marketShockPct = -((shockPct ?? 35) / 100);
-    levers.shockYear = 3;
+    const inYears = /\bin (\d{1,2}) years?\b/.exec(text);
+    const when = inYears ? Number(inYears[1]) : /\b(next year|this year)\b/.test(text) ? 1 : 3;
+    levers.shockYear = Math.min(60, Math.max(1, when));
   }
 
   if (/\b(career break|sabbatical|time off|quit|maternity|paternity|unemploy|job loss|lose my job)\b/.test(text)) {
-    const months = numbers.find((n) => n >= 1 && n <= 36 && Number.isInteger(n));
-    levers.careerBreakMonths = months ?? 12;
+    // "A 2 year break" is 24 months, not 2. Months win when both appear, and a
+    // year figure above ten is someone's age, not the length of a break.
+    const monthsMatch = /\b(\d{1,3})\s*months?\b/.exec(text);
+    const yearsMatch = /\b(\d{1,2}(?:\.\d+)?)\s*(?:years?|yrs?)\b/.exec(text);
+    const years = yearsMatch ? Number(yearsMatch[1]) : NaN;
+    const months = monthsMatch
+      ? Number(monthsMatch[1])
+      : years > 0 && years <= 10
+        ? Math.round(years * 12)
+        : 12;
+    levers.careerBreakMonths = Math.min(120, Math.max(1, months));
   }
 
   if (/\binflation\b/.test(text)) {

@@ -24,6 +24,7 @@ import {
   type UserProfile,
 } from '@wealth/shared';
 import { config } from '../config.js';
+import { leverSchema } from '../lib/levers.js';
 import { retrieve } from './knowledge/retriever.js';
 
 /**
@@ -67,6 +68,32 @@ export interface ToolDefinition {
 const currencyOf = (ctx: ToolContext) => ctx.profile.currency;
 const money = (value: number, ctx: ToolContext) => formatCompact(value, currencyOf(ctx));
 const pct = (value: number) => `${(value * 100).toFixed(1)}%`;
+
+/**
+ * The model's lever values, checked against the same schema the HTTP route
+ * uses. Non-numeric fields are dropped first, as before; out-of-range ones are
+ * reported back so the model can correct itself rather than narrate garbage.
+ */
+function validateLevers(
+  raw: Record<string, unknown>,
+): { ok: true; levers: ScenarioLevers } | { ok: false; problems: string } {
+  const numeric = Object.fromEntries(
+    Object.entries(raw).filter(([, v]) => typeof v === 'number' && Number.isFinite(v)),
+  );
+  const parsed = leverSchema.safeParse(numeric);
+  if (parsed.success) return { ok: true, levers: parsed.data as ScenarioLevers };
+  return {
+    ok: false,
+    problems: parsed.error.issues
+      .map((issue) => `${issue.path.join('.') || 'levers'}: ${issue.message}`)
+      .join('; '),
+  };
+}
+
+const LEVER_UNITS =
+  'Fractions are decimals: marketShockPct -0.35 is a 35% crash, inflationPct 0.08 is 8%, expenseMultiplier 0.9 is 10% less spending.';
+
+const GOAL_KINDS = ['retirement', 'home', 'education', 'vehicle', 'travel', 'emergency', 'wealth', 'custom'] as const;
 
 /** Collapses an allocation into a readable sentence. */
 function describeAllocation(weights: AllocationWeights): string {
@@ -244,9 +271,15 @@ export const TOOLS: ToolDefinition[] = [
     },
     handler: (input: ScenarioLevers & { label?: string }, ctx) => {
       const { label, ...levers } = input;
-      const cleaned = Object.fromEntries(
-        Object.entries(levers).filter(([, v]) => typeof v === 'number' && Number.isFinite(v)),
-      ) as ScenarioLevers;
+      const checked = validateLevers(levers);
+      if (!checked.ok) {
+        return {
+          summary: `Nothing was simulated - these levers are out of range: ${checked.problems}. ${LEVER_UNITS}`,
+          data: { error: 'invalid_levers', problems: checked.problems },
+          facts: {},
+        };
+      }
+      const cleaned = checked.levers;
       const result = runScenario({
         profile: ctx.profile,
         levers: cleaned,
@@ -610,6 +643,14 @@ export const TOOLS: ToolDefinition[] = [
       const avalanche = planDebtPayoff(ctx.profile, 'avalanche', extra);
       const snowball = planDebtPayoff(ctx.profile, 'snowball', extra);
       const saving = snowball.totalInterestPaid - avalanche.totalInterestPaid;
+      // Avalanche is usually cheaper, not always: a debt that never clears is
+      // left out of one order's total. The sentence follows the numbers.
+      const verdict =
+        saving > 0
+          ? `Avalanche saves ${money(saving, ctx)}`
+          : saving < 0
+            ? `Snowball costs ${money(-saving, ctx)} less here`
+            : 'Both orders cost the same';
       // An unpayable debt is the headline, not a footnote: no payoff date the
       // plan reports is meaningful while a balance is still growing.
       const blocked = avalanche.unpayable.length
@@ -621,7 +662,7 @@ export const TOOLS: ToolDefinition[] = [
             .join('; ')}.`
         : '';
       return {
-        summary: `Avalanche: clears ${avalanche.order.length} of ${ctx.profile.liabilities.length} debts in ${avalanche.monthsToDebtFree} months, ${money(avalanche.totalInterestPaid, ctx)} total interest. Snowball: ${snowball.monthsToDebtFree} months, ${money(snowball.totalInterestPaid, ctx)}. Avalanche saves ${money(Math.abs(saving), ctx)}${extra ? ` with ${money(extra, ctx)}/month extra` : ''}. Order: ${avalanche.order.map((o) => o.name).join(' → ') || 'none clears'}.${blocked}`,
+        summary: `Avalanche: clears ${avalanche.order.length} of ${ctx.profile.liabilities.length} debts in ${avalanche.monthsToDebtFree} months, ${money(avalanche.totalInterestPaid, ctx)} total interest. Snowball: ${snowball.monthsToDebtFree} months, ${money(snowball.totalInterestPaid, ctx)}. ${verdict}${extra ? ` with ${money(extra, ctx)}/month extra` : ''}. Order: ${avalanche.order.map((o) => o.name).join(' → ') || 'none clears'}.${blocked}`,
         data: { avalanche, snowball, interestSaved: saving },
         attachment: { kind: 'debt_plan', data: avalanche },
         facts: {
@@ -629,7 +670,7 @@ export const TOOLS: ToolDefinition[] = [
           'avalanche interest': avalanche.totalInterestPaid,
           'snowball months': snowball.monthsToDebtFree,
           'snowball interest': snowball.totalInterestPaid,
-          'interest saved by avalanche': Math.abs(saving),
+          [saving >= 0 ? 'interest saved by avalanche' : 'interest saved by snowball']: Math.abs(saving),
           ...Object.fromEntries(
             avalanche.unpayable.map((u) => [`${u.name} monthly shortfall`, u.monthlyShortfall]),
           ),
@@ -670,32 +711,44 @@ export const TOOLS: ToolDefinition[] = [
     },
     handler: (input: { scenarios: (ScenarioLevers & { label?: string })[] }, ctx) => {
       const baseline = buildSnapshot(ctx.profile);
-      const results = (input.scenarios ?? []).slice(0, 4).map((raw) => {
-        const { label, ...levers } = raw;
-        const cleaned = Object.fromEntries(
-          Object.entries(levers).filter(([, v]) => typeof v === 'number' && Number.isFinite(v)),
-        ) as ScenarioLevers;
-        return runScenario({
-          profile: ctx.profile,
-          levers: cleaned,
-          label: label ?? describeLevers(cleaned),
-          baseline,
-          // Fewer paths per scenario keeps a four-way comparison responsive.
-          paths: Math.max(500, Math.floor(config.simulationPaths / 2)),
+      const rejected: string[] = [];
+      const results = (Array.isArray(input.scenarios) ? input.scenarios : [])
+        .slice(0, 4)
+        .flatMap((raw) => {
+          const { label, ...levers } = raw ?? {};
+          const checked = validateLevers(levers);
+          if (!checked.ok) {
+            rejected.push(`"${label ?? 'unnamed'}" (${checked.problems})`);
+            return [];
+          }
+          const cleaned = checked.levers;
+          return [
+            runScenario({
+              profile: ctx.profile,
+              levers: cleaned,
+              label: label ?? describeLevers(cleaned),
+              baseline,
+              // Fewer paths per scenario keeps a four-way comparison responsive.
+              paths: Math.max(500, Math.floor(config.simulationPaths / 2)),
+            }),
+          ];
         });
-      });
       const ranked = [...results].sort(
         (a, b) => b.snapshot.netWorthAtRetirement - a.snapshot.netWorthAtRetirement,
       );
+      const skippedNote = rejected.length
+        ? `\nNot run, levers out of range: ${rejected.join('; ')}. ${LEVER_UNITS}`
+        : '';
       return {
-        summary: ranked.length
-          ? ranked
-              .map(
-                (r, i) =>
-                  `${i + 1}. ${r.label}: ${money(r.snapshot.netWorthAtRetirement, ctx)} (${r.deltaVsBaseline.netWorthAtRetirement >= 0 ? '+' : ''}${money(r.deltaVsBaseline.netWorthAtRetirement, ctx)}), ${pct(r.snapshot.retirementReadiness)} funded, ${pct(r.monteCarlo.successProbability)} success`,
-              )
-              .join('\n')
-          : 'No scenarios supplied.',
+        summary:
+          (ranked.length
+            ? ranked
+                .map(
+                  (r, i) =>
+                    `${i + 1}. ${r.label}: ${money(r.snapshot.netWorthAtRetirement, ctx)} (${r.deltaVsBaseline.netWorthAtRetirement >= 0 ? '+' : ''}${money(r.deltaVsBaseline.netWorthAtRetirement, ctx)}), ${pct(r.snapshot.retirementReadiness)} funded, ${pct(r.monteCarlo.successProbability)} success`,
+                )
+                .join('\n')
+            : 'No scenarios could be run.') + skippedNote,
         data: { baseline: baseline.retirement.projectedCorpus, results: ranked },
         facts: {
           'baseline retirement corpus': baseline.retirement.projectedCorpus,
@@ -781,7 +834,11 @@ export const TOOLS: ToolDefinition[] = [
         if (!goal) {
           return { summary: `No goal matched "${input.goal}". Nothing changed.`, data: { error: 'goal_not_found' }, facts: {} };
         }
-        if (typeof input.monthlyContribution !== 'number' || input.monthlyContribution < 0) {
+        if (
+          typeof input.monthlyContribution !== 'number' ||
+          !Number.isFinite(input.monthlyContribution) ||
+          input.monthlyContribution < 0
+        ) {
           return { summary: 'A non-negative monthlyContribution is required. Nothing changed.', data: { error: 'invalid_amount' }, facts: {} };
         }
         const previous = goal.monthlyContribution;
@@ -798,10 +855,17 @@ export const TOOLS: ToolDefinition[] = [
         };
       }
 
+      /*
+       * Every change here is held to the rules the profile schema enforces on
+       * save. The route persists what this tool produces without re-validating
+       * it, and a stored profile the schema would reject - a retirement age of
+       * 62.5, a goal due last year, a kind the enum does not know - made every
+       * later save from the browser fail until the user found and fixed it.
+       */
       if (input.change === 'set_retirement_age') {
         const age = Number(input.retirementAge);
-        if (!Number.isFinite(age) || age <= profile.age || age > 100) {
-          return { summary: `Retirement age must be between ${profile.age + 1} and 100. Nothing changed.`, data: { error: 'invalid_age' }, facts: {} };
+        if (!Number.isInteger(age) || age <= profile.age || age < 30 || age > 100) {
+          return { summary: `Retirement age must be a whole number between ${Math.max(30, profile.age + 1)} and 100. Nothing changed.`, data: { error: 'invalid_age' }, facts: {} };
         }
         const previous = profile.retirementAge;
         profile.retirementAge = age;
@@ -819,20 +883,36 @@ export const TOOLS: ToolDefinition[] = [
         if (!g.name || !Number.isFinite(g.targetAmountToday) || !Number.isFinite(g.targetYear)) {
           return { summary: 'A new goal needs at least a name, targetAmountToday and targetYear. Nothing changed.', data: { error: 'incomplete_goal' }, facts: {} };
         }
+        const thisYear = new Date().getUTCFullYear();
+        const targetYear = Number(g.targetYear);
+        const targetAmount = Number(g.targetAmountToday);
+        const contribution = Number(g.monthlyContribution ?? 0);
+        const name = String(g.name).trim().slice(0, 120);
+        if (!Number.isInteger(targetYear) || targetYear < thisYear || targetYear > 2150) {
+          return { summary: `targetYear must be a whole year from ${thisYear} to 2150. Nothing changed.`, data: { error: 'invalid_goal' }, facts: {} };
+        }
+        if (targetAmount < 0 || !Number.isFinite(contribution) || contribution < 0 || !name) {
+          return { summary: 'The goal needs a name, and its amounts cannot be negative. Nothing changed.', data: { error: 'invalid_goal' }, facts: {} };
+        }
+        if (profile.goals.length >= 30) {
+          return { summary: 'A plan can hold at most 30 goals. Nothing changed.', data: { error: 'too_many_goals' }, facts: {} };
+        }
+        const id = `goal-${Date.now()}`;
         profile.goals.push({
-          id: `goal-${Date.now()}`,
-          name: String(g.name),
-          kind: g.kind ?? 'custom',
-          targetAmountToday: Number(g.targetAmountToday),
-          targetYear: Number(g.targetYear),
+          id,
+          name,
+          kind: (GOAL_KINDS as readonly string[]).includes(g.kind) ? g.kind : 'custom',
+          targetAmountToday: targetAmount,
+          targetYear,
           currentSaved: 0,
-          monthlyContribution: Number(g.monthlyContribution ?? 0),
+          monthlyContribution: contribution,
           contributionStepUpPct: 0,
           priority: 'important',
         });
         const after = buildSnapshot(profile);
         ctx.onProfileChange?.(profile);
-        const projection = after.goalProjections.find((p) => p.goalName === g.name);
+        // By id: two goals can share a name, and the new one is the one to report.
+        const projection = after.goalProjections.find((p) => p.goalId === id);
         return {
           summary: `Added "${g.name}": ${money(Number(g.targetAmountToday), ctx)} by ${g.targetYear}. ${projection ? `Needs ${money(projection.requiredMonthly, ctx)}/month to fund fully; currently set to ${money(Number(g.monthlyContribution ?? 0), ctx)}.` : ''}`,
           data: { snapshot: after, projection },

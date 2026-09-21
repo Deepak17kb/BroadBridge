@@ -85,7 +85,9 @@ Partial update — a slider should not round-trip the entire balance sheet.
 { "liquidSavings": 800000 }
 ```
 
-Arrays (`holdings`, `liabilities`, `goals`) replace wholesale when present; merging them by index would be ambiguous and would silently corrupt a deletion.
+Arrays (`holdings`, `liabilities`, `goals`) replace wholesale when present; merging them by index would be ambiguous and would silently corrupt a deletion. The merged result is validated as a complete profile before it is stored, so an array item missing a required field (`{"goals": [{"id": "x"}]}`) is a `400`, not a stored profile that can no longer be projected.
+
+`assumptionOverrides` (on `PUT` and `PATCH`) is validated field by field against the ledger's own fields, each range-bounded — rates are decimals, `safeWithdrawalRatePct` must be above zero, and `expectedReturns` / `volatility` are keyed by asset class. A wrong type, an out-of-range value or an unknown asset class is a `400`; unknown top-level fields are dropped.
 
 ### `DELETE /api/profiles/:id`
 
@@ -135,6 +137,13 @@ Runs one scenario and returns the outcome, the delta against the current plan, p
 ```
 
 Every lever is optional; omitted means unchanged. All are range-bounded (`marketShockPct` is limited to −0.9…0.9, for example). Pass `seed` for a reproducible result.
+
+- `marketShockPct` without `shockYear` is modelled in year 1, the year the label and explanation name; the result echoes the `shockYear` it used.
+- `inflationPct: 0` is a real scenario (no inflation), not "unchanged".
+- `allocation` takes weights for the six asset classes only (`equity_domestic`, `equity_international`, `debt`, `gold`, `reit`, `cash`), at least one of them positive; they are normalised to sum to one. Unknown keys are a 400. The allocation applies to the retirement portfolio; each goal stays in the mix its own horizon calls for.
+- Extra saving, a lump sum and freed-up spending are split across the goals in proportion to their shortfalls, and the retirement projection receives only the share that lands in retirement-kind goals (all of it when there are no goals) — no rupee is counted twice.
+
+The agent's `simulate_scenario` and `compare_scenarios` tools validate levers against the same schema, and report an out-of-range lever back to the model instead of running it.
 
 ### `POST /api/plan/:id/scenarios/compare`
 

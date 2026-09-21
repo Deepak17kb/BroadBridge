@@ -16,7 +16,7 @@ import { classifyIntent, heuristicPlan, heuristicToolInput, type Intent } from '
 import { retrieve } from './knowledge/retriever.js';
 import { describeLlmError, getLlm } from './llm.js';
 import { composeDeterministicAnswer } from './synthesis.js';
-import { executeTool, toolSchemas, type ToolContext, type ToolResult } from './tools.js';
+import { executeTool, TOOL_MAP, toolSchemas, type ToolContext, type ToolResult } from './tools.js';
 import { groundingRatio, verifyAnswer } from './verifier.js';
 
 /**
@@ -117,7 +117,12 @@ export async function runAgent(opts: RunAgentOptions): Promise<AgentMessage> {
     return answer;
   } catch (error) {
     const described = describeLlmError(error);
-    logger.error('agent run failed', { runId, message: described.message });
+    // The raw error stays in the log; only the described message reaches the client.
+    logger.error('agent run failed', {
+      runId,
+      message: described.message,
+      cause: error instanceof Error ? error.message : String(error),
+    });
     opts.emit({ type: 'error', message: described.message, recoverable: described.recoverable });
 
     // A model failure must not lose the work already done - fall back to the
@@ -202,9 +207,7 @@ async function callTool(
   input: unknown,
   callId: string,
 ): Promise<ToolResult> {
-  const definition = toolSchemas().find((t) => t.name === tool);
-  const label =
-    (definition && labelFor(tool)) ?? `Running ${tool.replace(/_/g, ' ')}`;
+  const label = labelFor(tool) ?? `Running ${tool.replace(/_/g, ' ')}`;
 
   args.emit({ type: 'tool_call', id: callId, tool, input, label });
   const startedAt = Date.now();
@@ -249,22 +252,13 @@ async function callTool(
   return result;
 }
 
+/**
+ * The trace label a tool declares for itself. This was a second, hand-kept
+ * list that had drifted: the two newest tools were missing from it and showed
+ * in the trace as "Running estimate action impact".
+ */
 function labelFor(tool: string): string | undefined {
-  const labels: Record<string, string> = {
-    get_financial_snapshot: 'Reading the financial position',
-    project_goal: 'Projecting a goal',
-    simulate_scenario: 'Running a what-if scenario',
-    run_monte_carlo: 'Simulating market outcomes',
-    analyze_portfolio: 'Analysing the portfolio',
-    recommend_allocation: 'Deriving the target allocation',
-    get_next_best_actions: 'Ranking the next best actions',
-    plan_debt_payoff: 'Comparing debt payoff strategies',
-    compare_scenarios: 'Comparing scenarios side by side',
-    search_knowledge: 'Consulting the knowledge base',
-    update_plan: 'Updating the plan',
-    list_scenario_presets: 'Listing available scenarios',
-  };
-  return labels[tool];
+  return TOOL_MAP.get(tool)?.label;
 }
 
 /** Union of every number the tools produced, for the verifier. */

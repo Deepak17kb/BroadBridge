@@ -386,6 +386,12 @@ export function describeLlmError(error: unknown): { message: string; recoverable
   if (error instanceof Anthropic.APIError) {
     return { message: `Reasoning service error (${error.status}).`, recoverable: (error.status ?? 500) >= 500 };
   }
+  // A programming error's message is an internal detail - the client was sent
+  // "Cannot read properties of undefined (reading 'unpayable')" verbatim. The
+  // stack is logged by the caller; the user gets a plain sentence.
+  if (error instanceof TypeError || error instanceof ReferenceError || error instanceof RangeError) {
+    return { message: 'Something went wrong while preparing that answer.', recoverable: false };
+  }
   return {
     message: error instanceof Error ? error.message : 'Unknown reasoning failure',
     recoverable: false,

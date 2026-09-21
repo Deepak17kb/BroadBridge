@@ -57,6 +57,38 @@ const goalSchema = z.object({
   notes: z.string().max(500).optional(),
 });
 
+const assetClassSchema = z.enum(['equity_domestic', 'equity_international', 'debt', 'gold', 'reit', 'cash']);
+const rate = (min: number, max: number) => z.number().finite().min(min).max(max);
+
+/**
+ * The Assumptions ledger's overrides. Every field the engine reads is bounded
+ * here: this was `z.record(z.string(), z.any())`, so `{"inflationPct": "abc"}`
+ * was stored and every projection after it came back as `null` - and a zero
+ * withdrawal rate would divide the retirement target by zero. Unknown keys are
+ * dropped rather than rejected, so an older client's extra fields cannot lock
+ * a profile out of saving.
+ */
+const assumptionOverridesSchema = z
+  .object({
+    inflationPct: rate(0, 0.5),
+    riskFreePct: rate(0, 0.5),
+    expectedReturns: z.record(assetClassSchema, rate(-0.5, 1)),
+    volatility: z.record(assetClassSchema, rate(0, 2)),
+    correlations: z.record(z.string().max(60), rate(-1, 1)),
+    safeWithdrawalRatePct: z.number().finite().gt(0).max(0.2),
+    emergencyFundMonths: rate(0, 36),
+    healthCoverIncomeMultiple: rate(0, 50),
+    healthCoverFloorUnder40: rate(0, 1e10),
+    healthCoverFloor40To55: rate(0, 1e10),
+    healthCoverFloorOver55: rate(0, 1e10),
+    healthCoverPerDependent: rate(0, 1e10),
+    goalWeightMustHave: rate(0, 100),
+    goalWeightImportant: rate(0, 100),
+    goalWeightAspirational: rate(0, 100),
+    nearTermGoalMonths: rate(0, 1200),
+  })
+  .partial();
+
 export const profileSchema = z.object({
   id: z.string().min(1).max(80),
   displayName: z.string().min(1).max(80),
@@ -79,7 +111,7 @@ export const profileSchema = z.object({
   liabilities: z.array(liabilitySchema).max(50),
   goals: z.array(goalSchema).max(30),
   riskAnswers: z.record(z.string(), z.number().int().min(0).max(10)),
-  assumptionOverrides: z.record(z.string(), z.any()).optional(),
+  assumptionOverrides: assumptionOverridesSchema.optional(),
   lifeInsuranceCover: z.number().min(0).optional(),
   healthInsuranceCover: z.number().min(0).optional(),
   createdAt: z.string(),
@@ -225,10 +257,17 @@ router.patch(
       riskAnswers: { ...existing.riskAnswers, ...(patch.riskAnswers ?? {}) },
       updatedAt: new Date().toISOString(),
     };
-    if (merged.retirementAge <= merged.age) {
+    /*
+     * The merged result is validated as a whole profile before it is stored.
+     * `deepPartial()` also makes the fields *inside* array items optional, so
+     * `{"goals": [{"id": "x"}]}` passed, was saved, and every later snapshot of
+     * that profile threw a 500 - one bad request bricked it permanently.
+     */
+    const validated = parseBody(profileSchema, merged) as UserProfile;
+    if (validated.retirementAge <= validated.age) {
       throw badRequest('Retirement age must be greater than current age');
     }
-    const saved = await store.putProfile(merged);
+    const saved = await store.putProfile(validated);
     res.json({ profile: saved, snapshot: buildSnapshot(saved) });
   }),
 );

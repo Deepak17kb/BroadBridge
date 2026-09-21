@@ -168,18 +168,34 @@ export class DynamoStore implements Store {
 
   async getSession(id: string): Promise<ChatSession | null> {
     const { QueryCommand } = await import('@aws-sdk/lib-dynamodb');
-    const result = await this.client.send(
-      new QueryCommand({
-        TableName: this.table,
-        IndexName: 'byType',
-        KeyConditionExpression: '#t = :t',
-        FilterExpression: 'sessionId = :id',
-        ExpressionAttributeNames: { '#t': 'type' },
-        ExpressionAttributeValues: { ':t': 'session', ':id': id },
-        Limit: 1,
-      }),
-    );
-    return (result.Items?.[0]?.data as ChatSession | undefined) ?? null;
+    /*
+     * DynamoDB applies `Limit` *before* `FilterExpression`. The original
+     * `Limit: 1` read one session from the index, filtered it, and returned
+     * nothing unless that one happened to be the match - so once a table held
+     * more than one session, continuing a conversation started it afresh and
+     * overwrote its history, reopening one 404'd, and deleting one did nothing.
+     * Pages are walked until the id turns up, newest first, since the session
+     * being continued is almost always a recent one.
+     */
+    let startKey: Record<string, unknown> | undefined;
+    do {
+      const page = await this.client.send(
+        new QueryCommand({
+          TableName: this.table,
+          IndexName: 'byType',
+          KeyConditionExpression: '#t = :t',
+          FilterExpression: 'sessionId = :id',
+          ExpressionAttributeNames: { '#t': 'type' },
+          ExpressionAttributeValues: { ':t': 'session', ':id': id },
+          ScanIndexForward: false,
+          ExclusiveStartKey: startKey,
+        }),
+      );
+      const match = page.Items?.[0]?.data as ChatSession | undefined;
+      if (match) return match;
+      startKey = page.LastEvaluatedKey;
+    } while (startKey);
+    return null;
   }
 
   async putSession(session: ChatSession): Promise<ChatSession> {

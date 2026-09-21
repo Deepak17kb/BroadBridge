@@ -46,12 +46,21 @@ router.get(
 
 async function loadSession(profileId: string, sessionId?: string): Promise<ChatSession> {
   const store = await getStore();
+  let reuseId = sessionId;
   if (sessionId) {
     const existing = await store.getSession(sessionId);
-    if (existing) return existing;
+    if (existing?.profileId === profileId) return existing;
+    /*
+     * A conversation belongs to one profile. Continuing another profile's
+     * session replayed that person's history into this answer and appended
+     * this turn to *their* transcript, so it vanished from this profile's
+     * list. A foreign id starts a fresh conversation instead - under a new id,
+     * because reusing it would overwrite the other profile's session.
+     */
+    if (existing) reuseId = undefined;
   }
   return {
-    id: sessionId ?? `session-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 7)}`,
+    id: reuseId ?? `session-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 7)}`,
     profileId,
     messages: [],
     createdAt: new Date().toISOString(),

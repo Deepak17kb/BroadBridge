@@ -31,7 +31,19 @@ export interface SynthesisInput {
 }
 
 function find<T>(runs: SynthesisInput['runs'], tool: string): T | undefined {
-  return runs.find((r) => r.tool === tool)?.result.data as T | undefined;
+  const data = runs.find((r) => r.tool === tool)?.result.data;
+  // A tool that refused its input returns `{ error }`, not its usual shape.
+  // Templating over that printed "undefined is not on track ... ₹NaN", or threw
+  // and lost the whole answer - the tool's own summary says it better.
+  if (data && typeof data === 'object' && 'error' in data) return undefined;
+  return data as T | undefined;
+}
+
+/** The summary of a tool that ran but could not produce a result. */
+function failure(runs: SynthesisInput['runs'], tool: string): string | undefined {
+  const run = runs.find((r) => r.tool === tool);
+  const data = run?.result.data;
+  return data && typeof data === 'object' && 'error' in data ? run?.result.summary : undefined;
 }
 
 export function composeDeterministicAnswer(input: SynthesisInput): string {
@@ -71,7 +83,11 @@ export function composeDeterministicAnswer(input: SynthesisInput): string {
 
     case 'goal': {
       const projection = find<GoalProjection>(input.runs, 'project_goal');
-      if (!projection) break;
+      if (!projection) {
+        const reason = failure(input.runs, 'project_goal');
+        if (reason) paragraphs.push(reason);
+        break;
+      }
       if (projection.onTrack) {
         paragraphs.push(
           `"${projection.goalName}" is on track. It needs ${money(projection.inflatedTarget)} in ${projection.yearsToGoal.toFixed(1)} years once inflation is applied, and your current contribution projects to ${money(projection.projectedCorpus)} - a surplus of ${money(projection.surplus)}.`,
@@ -90,8 +106,16 @@ export function composeDeterministicAnswer(input: SynthesisInput): string {
       }
       const mc = find<MonteCarloResult>(input.runs, 'run_monte_carlo');
       if (mc) {
+        /*
+         * `run_monte_carlo` simulates the retirement plan. Placed straight after
+         * a paragraph about, say, the home goal, "X% reach the target" read as
+         * that goal's odds. It is labelled as retirement unless the goal in
+         * question is the retirement goal.
+         */
+        const goal = profile.goals.find((g) => g.id === projection.goalId);
+        const aboutRetirement = goal?.kind === 'retirement';
         paragraphs.push(
-          `Across ${mc.paths.toLocaleString('en-US')} simulated market paths, ${pct(mc.successProbability)} reach the target. The middle outcome is ${money(mc.median)}, with a range from ${money(mc.p10)} at the 10th percentile to ${money(mc.p90)} at the 90th - all in today's money.`,
+          `${aboutRetirement ? 'Across' : 'For your retirement plan as a whole, across'} ${mc.paths.toLocaleString('en-US')} simulated market paths, ${pct(mc.successProbability)} reach the ${money(mc.target)} ${aboutRetirement ? 'target' : 'retirement target'}. The middle outcome is ${money(mc.median)}, with a range from ${money(mc.p10)} at the 10th percentile to ${money(mc.p90)} at the 90th - all in today's money.`,
         );
       }
       break;
@@ -99,7 +123,11 @@ export function composeDeterministicAnswer(input: SynthesisInput): string {
 
     case 'whatif': {
       const scenario = find<ScenarioResult>(input.runs, 'simulate_scenario');
-      if (!scenario) break;
+      if (!scenario) {
+        const reason = failure(input.runs, 'simulate_scenario');
+        if (reason) paragraphs.push(reason);
+        break;
+      }
       paragraphs.push(scenario.explanation);
       const movedGoals = scenario.goalProjections.filter((g) => g.onTrack).length;
       const surplus = scenario.snapshot.monthlySurplus;
@@ -203,11 +231,14 @@ export function composeDeterministicAnswer(input: SynthesisInput): string {
     }
 
     case 'debt': {
-      const plan = find<{ avalanche: DebtPayoffPlan; snowball: DebtPayoffPlan; interestSaved: number }>(
+      const plan = find<{ avalanche?: DebtPayoffPlan; snowball: DebtPayoffPlan; interestSaved: number }>(
         input.runs,
         'plan_debt_payoff',
       );
-      if (!plan) {
+      // A debt-free profile gets `{ debts: [] }` back, not a plan. Reading
+      // `plan.avalanche.unpayable` off that threw, and the user got "I could not
+      // complete that request" for asking about a loan they do not have.
+      if (!plan?.avalanche) {
         paragraphs.push('You have no liabilities recorded, so there is nothing to pay off.');
         break;
       }
@@ -218,12 +249,23 @@ export function composeDeterministicAnswer(input: SynthesisInput): string {
           `Before comparing strategies: **${u.name}** at ${(u.interestRatePct * 100).toFixed(1)}% never clears at your current payment. It is about ${money(u.monthlyShortfall)} a month short of merely covering its own interest, so the balance grows regardless of what else you do. Raising that payment comes before every other step in this plan.`,
         );
       }
+      // The comparison follows the numbers: avalanche is usually cheaper, but a
+      // debt that never clears drops out of one order's total, and with a single
+      // debt the two orders are the same plan.
+      const verdict =
+        plan.interestSaved > 0
+          ? `so the avalanche saves ${money(plan.interestSaved)}`
+          : plan.interestSaved < 0
+            ? `so here the snowball costs ${money(-plan.interestSaved)} less`
+            : 'so both orders cost the same';
       paragraphs.push(
-        `Paying highest-interest-first (the avalanche) clears ${plan.avalanche.order.length} of your ${profile.liabilities.length} debts in ${plan.avalanche.monthsToDebtFree} months with ${money(plan.avalanche.totalInterestPaid)} of total interest. Smallest-balance-first (the snowball) takes ${plan.snowball.monthsToDebtFree} months and costs ${money(plan.snowball.totalInterestPaid)} - so the avalanche saves ${money(Math.abs(plan.interestSaved))}.`,
+        `Paying highest-interest-first (the avalanche) clears ${plan.avalanche.order.length} of your ${profile.liabilities.length} debts in ${plan.avalanche.monthsToDebtFree} months with ${money(plan.avalanche.totalInterestPaid)} of total interest. Smallest-balance-first (the snowball) takes ${plan.snowball.monthsToDebtFree} months and costs ${money(plan.snowball.totalInterestPaid)} - ${verdict}.`,
       );
-      paragraphs.push(
-        `The order to clear them: ${plan.avalanche.order.map((o) => `${o.name} (month ${o.payoffMonth})`).join(', then ')}.`,
-      );
+      if (plan.avalanche.order.length > 0) {
+        paragraphs.push(
+          `The order to clear them: ${plan.avalanche.order.map((o) => `${o.name} (month ${o.payoffMonth})`).join(', then ')}.`,
+        );
+      }
       const expensive = profile.liabilities.filter(
         (l) => l.interestRatePct > (snapshot?.portfolio.expectedReturnPct ?? 0.11),
       );
