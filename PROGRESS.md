@@ -1246,3 +1246,46 @@ Anything I deliberately left out:
   (600 ms debounce); the Scenario Lab edits nothing, so it does not arise today.
 - **A pending debounced save is lost on a reload within 600 ms**, and the
   Actions page's "Applied" state is keyed by action id for the life of the page.
+
+## Fix — a beige block behind the hovered goal in "All goals"  [done]
+
+**The report:** hovering a bar in the "All goals" chart (Needed at goal date vs
+Projected) drew a beige/light-grey rectangle over the whole category.
+
+**Cause.** Recharts' default tooltip cursor for a `BarChart` is a solid `#ccc`
+rectangle (`getCursorRectangle`: `fill: '#ccc'`), and `GoalFundingChart` never
+set `cursor`. Nothing else contributed: neither `<Bar>` sets `activeBar` or a
+hover style, and no stylesheet touches `.recharts-tooltip-cursor` or
+`.recharts-rectangle`, so no CSS override was needed.
+
+Files touched:
+- `packages/web/src/components/charts/Charts.tsx` — `cursor={{ fill: 'var(--chart-cursor)' }}`
+  on the chart's `<Tooltip>`. Nothing else in the chart changed.
+- `packages/web/src/styles.css` — new `--chart-cursor` token.
+
+Decisions I made without asking:
+- **A theme token, not a literal.** Dark (the default) is exactly the requested
+  `rgba(255, 255, 255, 0.04)`; the light theme gets `rgba(16, 24, 40, 0.04)`,
+  because a white tint on a white card would vanish rather than read as subtle.
+- **Only this chart.** The Scenario Lab's `OutcomeHistogram` and
+  `ScenarioComparison` are also `BarChart`s with the default `#ccc` cursor;
+  they are the same one-line fix with the same token, not done here.
+
+Verified in headless Chrome (Aarav plus an added "New goal"): hovering Emergency
+Fund, Japan Trip, New goal and Retirement, the cursor's fill is
+`var(--chart-cursor)` -> `rgba(255, 255, 255, 0.04)` in dark and
+`rgba(16, 24, 40, 0.04)` in light - never `#ccc` - each tooltip card still
+renders, the bar fills are unchanged (`var(--border-strong)`, and the status
+colour per cell), and there were no page errors.
+
+Tests: no test can see a hover cursor under server rendering, so none added.
+```
+ℹ tests 105   ℹ pass 105   ℹ fail 0      (shared)
+ℹ tests 91    ℹ pass 91    ℹ fail 0      (server)
+ℹ tests 37    ℹ pass 37    ℹ fail 0      (web)
+$ npm run typecheck -> exit 0    $ npm run lint -> exit 0
+```
+
+Anything I deliberately left out:
+- The y-axis labels in this chart wrap and crowd ("₹22.00" over "Cr") because
+  the axis is 58px wide; the brief said to leave the axes as they are.

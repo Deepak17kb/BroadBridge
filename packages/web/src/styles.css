@@ -64,6 +64,9 @@
   --seq-700: #6da7ec;
 
   --grid: #232d4a;
+  /* Hover band behind a bar-chart category. Recharts' default is a solid #ccc
+     block, which reads as a beige slab on navy. */
+  --chart-cursor: rgba(255, 255, 255, 0.04);
 
   --radius: 14px;
   --radius-sm: 9px;
@@ -118,6 +121,7 @@
   --seq-700: #1c5cab;
 
   --grid: #e2e6f0;
+  --chart-cursor: rgba(16, 24, 40, 0.04);
 
   --shadow: 0 1px 2px rgb(16 24 40 / 0.06), 0 8px 24px -14px rgb(16 24 40 / 0.14);
   --shadow-lg: 0 24px 60px -28px rgb(16 24 40 / 0.22);

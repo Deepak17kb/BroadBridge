@@ -500,6 +500,10 @@ export function GoalFundingChart({
               tickFormatter={(v: number) => formatCompact(v, currency)}
             />
             <Tooltip
+              // Recharts draws a solid #ccc block behind the hovered category by
+              // default - a beige slab on the navy theme. A faint theme tint
+              // keeps the "this is the goal you are on" cue without it.
+              cursor={{ fill: 'var(--chart-cursor)' }}
               content={({ active, payload }) => {
                 if (!active || !payload?.length) return null;
                 const d = payload[0]?.payload as (typeof data)[number] | undefined;
