@@ -9,7 +9,17 @@ import {
 } from '@wealth/shared';
 import { api } from '../lib/api';
 import { useLoadedProfile, useProfile } from '../state/ProfileContext';
-import { Badge, Callout, Card, MoneyInput, NumberInput, ProgressBar, ScoreRing, Stat } from '../components/ui';
+import {
+  Badge,
+  Callout,
+  Card,
+  Icon,
+  MoneyInput,
+  NumberInput,
+  ProgressBar,
+  ScoreRing,
+  Stat,
+} from '../components/ui';
 import { ExpenseBars } from '../components/charts/Charts';
 
 /**
@@ -194,13 +204,13 @@ export function Profile() {
                     onChange={(v) => updateProfile((d) => void (d.cashflow.monthlyExpenses[category] = v))}
                   />
                   <button
-                    className="btn btn-sm btn-ghost"
-                    style={{ marginTop: 4 }}
+                    className="btn btn-sm btn-ghost mt-1"
                     onClick={() =>
                       updateProfile((d) => {
                         delete d.cashflow.monthlyExpenses[category];
                       })
                     }
+                    aria-label={`Remove ${category}`}
                   >
                     Remove
                   </button>
@@ -210,7 +220,6 @@ export function Profile() {
 
             <form
               className="row"
-              style={{ marginTop: 14 }}
               onSubmit={(e) => {
                 e.preventDefault();
                 const name = newCategory.trim();
@@ -220,19 +229,18 @@ export function Profile() {
               }}
             >
               <input
-                className="input"
-                style={{ maxWidth: 220 }}
+                className="input input-short"
                 placeholder="New category name"
                 value={newCategory}
                 onChange={(e) => setNewCategory(e.target.value)}
                 aria-label="New expense category"
               />
               <button className="btn btn-sm" type="submit" disabled={!newCategory.trim()}>
-                + Add category
+                <Icon name="plus" /> Add category
               </button>
             </form>
 
-            <div className="divider" style={{ margin: '16px 0' }} />
+            <hr className="divider" />
             <ExpenseBars breakdown={snapshot.cashflow.expenseBreakdown} currency={currency} />
           </Card>
 
@@ -271,11 +279,13 @@ export function Profile() {
             <div className="stack">
               {RISK_QUESTIONS.map((q) => (
                 <div key={q.id}>
-                  <div className="row-between" style={{ marginBottom: 7 }}>
-                    <span className="field-label">{q.prompt}</span>
+                  <div className="row-between items-start mb-2">
+                    <span className="field-label" id={`risk-q-${q.id}`}>
+                      {q.prompt}
+                    </span>
                     <Badge>{q.dimension === 'tolerance' ? 'willingness' : 'ability'}</Badge>
                   </div>
-                  <div className="stack-sm">
+                  <div className="stack-sm" role="radiogroup" aria-labelledby={`risk-q-${q.id}`}>
                     {q.options.map((opt, idx) => {
                       const checked = profile.riskAnswers[q.id] === idx;
                       return (
@@ -342,13 +352,13 @@ export function Profile() {
         </div>
 
         {/* Live effect of the edits. */}
-        <div className="stack" style={{ position: 'sticky', top: 82, alignSelf: 'start' }}>
+        <div className="stack sticky-aside">
           <Card title="Your risk profile">
-            <div className="row" style={{ gap: 16, alignItems: 'center' }}>
+            <div className="row gap-4">
               <ScoreRing score={risk.effectiveScore} size={104} />
-              <div>
+              <div className="flex-1">
                 <Badge tone="accent">{risk.bucket}</Badge>
-                <div className="stack-sm" style={{ marginTop: 10 }}>
+                <div className="stack-sm mt-3">
                   <div>
                     <div className="row-between text-xs">
                       <span className="text-muted">Willingness</span>
@@ -366,14 +376,12 @@ export function Profile() {
                 </div>
               </div>
             </div>
-            <div className="divider" style={{ margin: '14px 0' }} />
-            <div className="stack-sm">
+            <hr className="divider" />
+            <ul className="bullets text-xs text-muted">
               {risk.drivers.map((d) => (
-                <div className="text-xs text-muted" key={d}>
-                  • {d}
-                </div>
+                <li key={d}>{d}</li>
               ))}
-            </div>
+            </ul>
           </Card>
 
           <Card title="Live plan summary">
@@ -383,7 +391,7 @@ export function Profile() {
                 value={`${snapshot.wellness.total}/100`}
                 meta={`Grade ${snapshot.wellness.grade}`}
               />
-              <div className="divider" />
+              <hr className="divider" />
               <div className="row-between text-sm">
                 <span className="text-muted">Monthly surplus</span>
                 <span className={`num strong ${snapshot.cashflow.monthlySurplus >= 0 ? 'text-positive' : 'text-negative'}`}>

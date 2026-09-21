@@ -182,7 +182,87 @@ test('the goal list card sizes to its goals instead of stretching to the column 
   // Grid items stretch to the row by default, which left the card as tall as
   // the detail column - over a thousand pixels of empty card below three goals.
   const html = render(structuredClone(PERSONAS[0]!.profile), Goals);
-  assert.match(html, /<section class="card\s+self-start"><header class="card-head"><div><h3 class="card-title">Your goals<\/h3>/);
+  assert.match(
+    html,
+    /<section class="card self-start"><header class="card-head"><div class="card-heading"><h2 class="card-title">Your goals<\/h2>/,
+  );
+});
+
+/* -------------------------------------------------------------------------- */
+/* Accessibility                                                               */
+/* -------------------------------------------------------------------------- */
+
+/** Heading levels in document order. */
+function headingLevels(html: string): number[] {
+  return [...html.matchAll(/<h([1-6])[\s>]/g)].map((m) => Number(m[1]));
+}
+
+test('every page has one h1 and its headings never skip a level', () => {
+  // The cards used h3 titles straight under the page's h1.
+  for (const persona of PERSONAS) {
+    for (const [name, Page] of Object.entries(PAGES)) {
+      const levels = headingLevels(render(structuredClone(persona.profile), Page as () => JSX.Element));
+      const where = `${name} (${persona.id})`;
+      assert.equal(levels[0], 1, `${where} starts with its h1`);
+      assert.equal(levels.filter((l) => l === 1).length, 1, `${where} has exactly one h1`);
+      levels.forEach((level, i) => {
+        const previous = levels[i - 1];
+        if (previous !== undefined) {
+          assert.ok(level <= previous + 1, `${where}: an h${previous} is followed by an h${level}`);
+        }
+      });
+    }
+  }
+});
+
+/**
+ * Controls with no accessible name: no aria-label or aria-labelledby, no
+ * <label for> pointing at them, and no <label> around them.
+ */
+function unnamedControls(html: string): string[] {
+  const labelled = new Set([...html.matchAll(/<label[^>]*\sfor="([^"]+)"/g)].map((m) => m[1]));
+  const unnamed: string[] = [];
+  for (const match of html.matchAll(/<(input|select|textarea)\b([^>]*)>/g)) {
+    const attrs = match[2]!;
+    if (/type="hidden"/.test(attrs) || /aria-label(ledby)?="[^"]+"/.test(attrs)) continue;
+    const id = /\sid="([^"]+)"/.exec(attrs)?.[1];
+    if (id && labelled.has(id)) continue;
+    const before = html.slice(0, match.index);
+    if (before.lastIndexOf('<label') > before.lastIndexOf('</label>')) continue;
+    unnamed.push(`<${match[1]}${attrs.slice(0, 90)}>`);
+  }
+  return unnamed;
+}
+
+test('every form control has an accessible name', () => {
+  // 25 of the 26 money fields showed a label that was linked to nothing, so a
+  // screen reader announced a bare "edit text".
+  for (const persona of PERSONAS) {
+    for (const [name, Page] of Object.entries(PAGES)) {
+      const html = render(structuredClone(persona.profile), Page as () => JSX.Element);
+      assert.deepEqual(unnamedControls(html), [], `${name} (${persona.id})`);
+    }
+  }
+  const empty = emptyProfile('empty-user', 'New User');
+  for (const [name, Page] of Object.entries(PAGES)) {
+    const html = render(structuredClone(empty), Page as () => JSX.Element);
+    assert.deepEqual(unnamedControls(html), [], `${name} (empty profile)`);
+  }
+});
+
+test('the goal list is one tab stop, on the selected goal', () => {
+  // Arrow keys move between goals (verified in the browser); Tab should reach
+  // the list once, not once per goal.
+  const html = render(structuredClone(PERSONAS[0]!.profile), Goals);
+  const items = [...html.matchAll(/<button type="button" class="goal-item[^"]*"[^>]*>/g)].map((m) => m[0]);
+  assert.ok(items.length >= 2, 'the persona has several goals');
+  assert.equal(items.filter((item) => /tabindex="0"/.test(item)).length, 1);
+  assert.match(items[0]!, /aria-current="true"/);
+  assert.match(items[0]!, /tabindex="0"/);
+  for (const item of items.slice(1)) {
+    assert.match(item, /tabindex="-1"/);
+    assert.doesNotMatch(item, /aria-current/);
+  }
 });
 
 test('the % funded axis is 0-100% in 25% steps and stretches to fit an over-funded goal', () => {

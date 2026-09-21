@@ -7,7 +7,21 @@ import {
   type AssetClass,
 } from '@wealth/shared';
 import { useLoadedProfile, useProfile } from '../state/ProfileContext';
-import { AssumptionList, Badge, Callout, Card, Empty, MoneyInput, NumberInput, Slider, Stat } from '../components/ui';
+import {
+  AnimatedNumber,
+  AssumptionList,
+  Badge,
+  Callout,
+  Card,
+  CardSection,
+  EmptyState,
+  Icon,
+  MoneyInput,
+  NumberInput,
+  ProgressBar,
+  Slider,
+  Stat,
+} from '../components/ui';
 import { RiskLadder, useRiskLadder } from '../components/RiskLadder';
 import { AllocationBar, AllocationLegend, DriftChart } from '../components/charts/Charts';
 
@@ -39,6 +53,8 @@ export function Portfolio() {
   }, [profile, extraDebtPayment]);
 
   const totalDebt = profile.liabilities.reduce((a, l) => a + l.outstanding, 0);
+  const money = (v: number) => formatCompact(v, currency);
+  const diversification = portfolio.diversificationScore;
 
   return (
     <div className="stack">
@@ -54,7 +70,7 @@ export function Portfolio() {
         <Card>
           <Stat
             label="Portfolio value"
-            value={formatCompact(portfolio.totalValue, currency)}
+            value={<AnimatedNumber value={portfolio.totalValue} format={money} />}
             meta={`${profile.holdings.length} holdings plus cash`}
           />
         </Card>
@@ -84,7 +100,7 @@ export function Portfolio() {
 
       {portfolio.totalValue === 0 ? (
         <Card>
-          <Empty
+          <EmptyState
             title="No holdings recorded"
             message="Add what you hold below and the engine will analyse the allocation, risk, fees and drift."
           />
@@ -112,44 +128,42 @@ export function Portfolio() {
                 <AllocationLegend weights={portfolio.weights} />
               </div>
 
-              <div className="divider" style={{ margin: '16px 0' }} />
+              <hr className="divider" />
 
-              <div className="card-title" style={{ marginBottom: 4 }}>
-                Out of position
-              </div>
-              <div className="card-sub" style={{ marginBottom: 12 }}>
-                Which way and how far each asset class sits from where it should be
-              </div>
-              <DriftChart portfolio={portfolio} currency={currency} />
+              <CardSection
+                title="Out of position"
+                subtitle="Which way and how far each asset class sits from where it should be"
+              >
+                <DriftChart portfolio={portfolio} currency={currency} />
+              </CardSection>
 
               {portfolio.rebalanceTrades.length > 0 && (
                 <>
-                  <div className="divider" style={{ margin: '16px 0' }} />
-                  <div className="card-title" style={{ marginBottom: 10 }}>
-                    Trades that would close the gap
-                  </div>
-                  <div className="table-wrap">
-                    <table className="data">
-                      <thead>
-                        <tr>
-                          <th>Action</th>
-                          <th>Asset class</th>
-                          <th className="right">Amount</th>
-                        </tr>
-                      </thead>
-                      <tbody>
-                        {portfolio.rebalanceTrades.map((t) => (
-                          <tr key={t.assetClass}>
-                            <td>
-                              <Badge tone={t.action === 'buy' ? 'info' : 'warning'}>{t.action}</Badge>
-                            </td>
-                            <td>{ASSET_LABELS[t.assetClass]}</td>
-                            <td className="right num">{formatCompact(t.amount, currency)}</td>
+                  <hr className="divider" />
+                  <CardSection title="Trades that would close the gap">
+                    <div className="table-wrap">
+                      <table className="data">
+                        <thead>
+                          <tr>
+                            <th>Action</th>
+                            <th>Asset class</th>
+                            <th className="right">Amount</th>
                           </tr>
-                        ))}
-                      </tbody>
-                    </table>
-                  </div>
+                        </thead>
+                        <tbody>
+                          {portfolio.rebalanceTrades.map((t) => (
+                            <tr key={t.assetClass}>
+                              <td>
+                                <Badge tone={t.action === 'buy' ? 'info' : 'warning'}>{t.action}</Badge>
+                              </td>
+                              <td>{ASSET_LABELS[t.assetClass]}</td>
+                              <td className="right num">{formatCompact(t.amount, currency)}</td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    </div>
+                  </CardSection>
                   <Callout tone="info">
                     Direct new contributions at the underweight classes before selling anything —
                     same result, no realised gains. Transaction costs and capital gains tax are not
@@ -166,15 +180,14 @@ export function Portfolio() {
                 <div className="stack-sm">
                   <div className="row-between">
                     <span className="text-sm">Diversification score</span>
-                    <span className="text-sm num strong">{portfolio.diversificationScore}/100</span>
+                    <span className="text-sm num strong">{diversification}/100</span>
                   </div>
-                  <div className="bar">
-                    <div
-                      className={`bar-fill ${portfolio.diversificationScore >= 70 ? 'positive' : portfolio.diversificationScore >= 45 ? 'warning' : 'negative'}`}
-                      style={{ width: `${portfolio.diversificationScore}%` }}
-                    />
-                  </div>
-                  <div className="divider" />
+                  <ProgressBar
+                    value={diversification / 100}
+                    tone={diversification >= 70 ? 'positive' : diversification >= 45 ? 'warning' : 'negative'}
+                    label="Diversification score"
+                  />
+                  <hr className="divider" />
                   <div className="row-between">
                     <span className="text-sm text-muted">Effective positions</span>
                     <span className="text-sm num">{portfolio.effectivePositions}</span>
@@ -195,7 +208,7 @@ export function Portfolio() {
                         : 'none held'}
                     </span>
                   </div>
-                  <p className="text-xs text-subtle" style={{ marginTop: 4 }}>
+                  <p className="text-xs text-subtle mt-1">
                     Only individual securities count toward concentration risk. A large index-fund or
                     provident-fund position is diversified internally, so flagging it would be noise.
                   </p>
@@ -218,7 +231,7 @@ export function Portfolio() {
                   meta={`About ${formatCompact(portfolio.blendedExpenseRatioPct * portfolio.totalValue, currency)} a year at today's balance`}
                   tone={portfolio.blendedExpenseRatioPct > 0.01 ? 'negative' : portfolio.blendedExpenseRatioPct > 0.006 ? 'warning' : 'positive'}
                 />
-                <p className="text-xs text-muted" style={{ marginTop: 11 }}>
+                <p className="text-xs text-muted">
                   Fees compound against you exactly as returns compound for you, and unlike returns
                   they are certain. Over 25 years the difference between 0.2% and 1.8% consumes
                   roughly a third of the final corpus.
@@ -270,7 +283,7 @@ export function Portfolio() {
                   )
                 }
               >
-                + Add holding
+                <Icon name="plus" /> Add holding
               </button>
             }
           >
@@ -286,7 +299,9 @@ export function Portfolio() {
                     <th className="right">Gain</th>
                     <th className="right">Fee</th>
                     <th className="right">Weight</th>
-                    <th />
+                    <th>
+                      <span className="sr-only">Remove</span>
+                    </th>
                   </tr>
                 </thead>
                 <tbody>
@@ -297,8 +312,7 @@ export function Portfolio() {
                       <tr key={h.id}>
                         <td>
                           <input
-                            className="input"
-                            style={{ minWidth: 130 }}
+                            className="input cell-input"
                             value={h.name}
                             aria-label="Holding name"
                             onChange={(e) => updateProfile((d) => void (d.holdings[i]!.name = e.target.value))}
@@ -306,8 +320,7 @@ export function Portfolio() {
                         </td>
                         <td>
                           <select
-                            className="select"
-                            style={{ minWidth: 128 }}
+                            className="select cell-input"
                             value={h.assetClass}
                             aria-label="Asset class"
                             onChange={(e) =>
@@ -325,8 +338,7 @@ export function Portfolio() {
                         </td>
                         <td>
                           <select
-                            className="select"
-                            style={{ minWidth: 100 }}
+                            className="select cell-input"
                             value={h.instrumentKind ?? 'fund'}
                             aria-label="Instrument type"
                             onChange={(e) =>
@@ -344,8 +356,9 @@ export function Portfolio() {
                             <option value="deposit">Deposit</option>
                           </select>
                         </td>
-                        <td className="right" style={{ minWidth: 118 }}>
+                        <td className="right cell-input">
                           <MoneyInput
+                            ariaLabel={`Value of ${h.name}`}
                             value={value}
                             currency={currency}
                             step={10000}
@@ -357,8 +370,9 @@ export function Portfolio() {
                             }
                           />
                         </td>
-                        <td className="right" style={{ minWidth: 118 }}>
+                        <td className="right cell-input">
                           <MoneyInput
+                            ariaLabel={`Cost of ${h.name}`}
                             value={h.costBasis}
                             currency={currency}
                             step={10000}
@@ -374,8 +388,7 @@ export function Portfolio() {
                               rewrote a half-typed "0.5" as "0.50" and then 0.505. */}
                           <NumberInput
                             key={`fee-${h.id}`}
-                            className="input num"
-                            style={{ width: 74 }}
+                            className="input num cell-input-sm"
                             min={0}
                             max={10}
                             step={0.05}
@@ -394,11 +407,11 @@ export function Portfolio() {
                         </td>
                         <td>
                           <button
-                            className="btn btn-sm btn-danger"
+                            className="btn btn-sm btn-icon btn-danger"
                             onClick={() => updateProfile((d) => void d.holdings.splice(i, 1))}
                             aria-label={`Remove ${h.name}`}
                           >
-                            ×
+                            <Icon name="close" />
                           </button>
                         </td>
                       </tr>
@@ -408,8 +421,9 @@ export function Portfolio() {
                     <td colSpan={3} className="strong">
                       Cash and liquid savings
                     </td>
-                    <td className="right" style={{ minWidth: 118 }}>
+                    <td className="right cell-input">
                       <MoneyInput
+                        ariaLabel="Cash and liquid savings"
                         value={profile.liquidSavings}
                         currency={currency}
                         step={10000}
@@ -458,12 +472,12 @@ export function Portfolio() {
               )
             }
           >
-            + Add debt
+            <Icon name="plus" /> Add debt
           </button>
         }
       >
         {profile.liabilities.length === 0 ? (
-          <Empty title="Debt free" message="Nothing owed — that is a strong place to be planning from." />
+          <EmptyState title="Debt free" message="Nothing owed — that is a strong place to be planning from." />
         ) : (
           <>
             <div className="table-wrap">
@@ -476,7 +490,9 @@ export function Portfolio() {
                     <th className="right">Rate</th>
                     <th className="right">EMI</th>
                     <th>Versus investing</th>
-                    <th />
+                    <th>
+                      <span className="sr-only">Remove</span>
+                    </th>
                   </tr>
                 </thead>
                 <tbody>
@@ -486,8 +502,7 @@ export function Portfolio() {
                       <tr key={l.id}>
                         <td>
                           <input
-                            className="input"
-                            style={{ minWidth: 126 }}
+                            className="input cell-input"
                             value={l.name}
                             aria-label="Debt name"
                             onChange={(e) =>
@@ -497,8 +512,7 @@ export function Portfolio() {
                         </td>
                         <td>
                           <select
-                            className="select"
-                            style={{ minWidth: 126 }}
+                            className="select cell-input"
                             value={l.kind}
                             aria-label="Debt type"
                             onChange={(e) =>
@@ -517,8 +531,9 @@ export function Portfolio() {
                             <option value="other">Other</option>
                           </select>
                         </td>
-                        <td className="right" style={{ minWidth: 118 }}>
+                        <td className="right cell-input">
                           <MoneyInput
+                            ariaLabel={`Outstanding on ${l.name}`}
                             value={l.outstanding}
                             currency={currency}
                             step={10000}
@@ -528,8 +543,7 @@ export function Portfolio() {
                         <td className="right">
                           <NumberInput
                             key={`rate-${l.id}`}
-                            className="input num"
-                            style={{ width: 78 }}
+                            className="input num cell-input-sm"
                             min={0}
                             max={100}
                             step={0.25}
@@ -543,8 +557,9 @@ export function Portfolio() {
                             }
                           />
                         </td>
-                        <td className="right" style={{ minWidth: 108 }}>
+                        <td className="right cell-input">
                           <MoneyInput
+                            ariaLabel={`EMI for ${l.name}`}
                             value={l.emi}
                             currency={currency}
                             step={1000}
@@ -558,11 +573,11 @@ export function Portfolio() {
                         </td>
                         <td>
                           <button
-                            className="btn btn-sm btn-danger"
+                            className="btn btn-sm btn-icon btn-danger"
                             onClick={() => updateProfile((d) => void d.liabilities.splice(i, 1))}
                             aria-label={`Remove ${l.name}`}
                           >
-                            ×
+                            <Icon name="close" />
                           </button>
                         </td>
                       </tr>
@@ -574,96 +589,90 @@ export function Portfolio() {
 
             {debtPlans && (
               <>
-                <div className="divider" style={{ margin: '16px 0' }} />
-                <div className="card-title" style={{ marginBottom: 4 }}>
-                  Payoff strategies
-                </div>
-                <div className="card-sub" style={{ marginBottom: 14 }}>
-                  Avalanche clears the highest rate first and is mathematically optimal. Snowball
-                  clears the smallest balance first and is easier to stick to. Both are shown because
-                  the one you will actually follow is the better one.
-                </div>
+                <hr className="divider" />
+                <CardSection
+                  title="Payoff strategies"
+                  subtitle="Avalanche clears the highest rate first and is mathematically optimal. Snowball clears the smallest balance first and is easier to stick to. Both are shown because the one you will actually follow is the better one."
+                >
+                  <div className="stack">
+                    {/* A balance that grows outranks any payoff-strategy comparison. */}
+                    {debtPlans.avalanche.unpayable.map((u) => (
+                      <Callout key={u.liabilityId} tone="negative">
+                        <strong>{u.name}</strong> never clears at your current payment. At{' '}
+                        {formatPercent(u.interestRatePct)} a year it accrues more interest each month
+                        than you pay, so the balance grows by about{' '}
+                        <strong>{formatCompact(u.monthlyShortfall, currency)}</strong> a month. Raising
+                        that payment comes before every other step below.
+                      </Callout>
+                    ))}
 
-                {/* A balance that grows outranks any payoff-strategy comparison. */}
-                {debtPlans.avalanche.unpayable.map((u) => (
-                  <div key={u.liabilityId} style={{ marginBottom: 12 }}>
-                    <Callout tone="negative">
-                      <strong>{u.name}</strong> never clears at your current payment. At{' '}
-                      {formatPercent(u.interestRatePct)} a year it accrues more interest each month
-                      than you pay, so the balance grows by about{' '}
-                      <strong>{formatCompact(u.monthlyShortfall, currency)}</strong> a month. Raising
-                      that payment comes before every other step below.
+                    <Slider
+                      label="Extra you could put towards debt each month"
+                      value={extraDebtPayment}
+                      min={0}
+                      max={Math.max(20000, Math.round(snapshot.cashflow.monthlyIncome * 0.3))}
+                      step={1000}
+                      onChange={setExtraDebtPayment}
+                      format={(v) => (v ? `+${formatCompact(v, currency)}` : 'EMIs only')}
+                    />
+
+                    <div className="grid grid-2">
+                      {(['avalanche', 'snowball'] as const).map((strategy) => {
+                        const plan = debtPlans[strategy];
+                        const other = debtPlans[strategy === 'avalanche' ? 'snowball' : 'avalanche'];
+                        const better = plan.totalInterestPaid <= other.totalInterestPaid;
+                        return (
+                          <div className="card" key={strategy}>
+                            <div className="row-between mb-3">
+                              <h4 className="card-title capitalize">{strategy}</h4>
+                              {better && <Badge tone="positive">costs less</Badge>}
+                            </div>
+                            <div className="grid grid-pair">
+                              <Stat
+                                label={plan.clearsEverything ? 'Debt free in' : 'Clears what it can in'}
+                                value={`${plan.monthsToDebtFree} mo`}
+                                meta={
+                                  plan.clearsEverything
+                                    ? `${(plan.monthsToDebtFree / 12).toFixed(1)} years`
+                                    : `${plan.order.length} of ${profile.liabilities.length} debts`
+                                }
+                                tone={plan.clearsEverything ? 'neutral' : 'warning'}
+                              />
+                              <Stat
+                                label="Total interest"
+                                value={formatCompact(plan.totalInterestPaid, currency)}
+                                tone={better ? 'positive' : 'negative'}
+                              />
+                            </div>
+                            <hr className="divider divider-spaced" />
+                            <ol className="list-plain stack-sm" aria-label={`${strategy} payoff order`}>
+                              {plan.order.map((o, idx) => (
+                                <li className="row-between text-sm" key={o.liabilityId}>
+                                  <span className="text-muted">
+                                    {idx + 1}. {o.name}
+                                  </span>
+                                  <span className="num text-xs text-subtle">month {o.payoffMonth}</span>
+                                </li>
+                              ))}
+                            </ol>
+                          </div>
+                        );
+                      })}
+                    </div>
+
+                    <Callout tone="info">
+                      Avalanche saves{' '}
+                      <strong>
+                        {formatCompact(
+                          Math.abs(debtPlans.snowball.totalInterestPaid - debtPlans.avalanche.totalInterestPaid),
+                          currency,
+                        )}
+                      </strong>{' '}
+                      in interest over snowball here. If the gap is small, pick the one you will stick to —
+                      a plan abandoned halfway costs more than either.
                     </Callout>
                   </div>
-                ))}
-
-                <Slider
-                  label="Extra you could put towards debt each month"
-                  value={extraDebtPayment}
-                  min={0}
-                  max={Math.max(20000, Math.round(snapshot.cashflow.monthlyIncome * 0.3))}
-                  step={1000}
-                  onChange={setExtraDebtPayment}
-                  format={(v) => (v ? `+${formatCompact(v, currency)}` : 'EMIs only')}
-                />
-
-                <div className="grid grid-2" style={{ marginTop: 14 }}>
-                  {(['avalanche', 'snowball'] as const).map((strategy) => {
-                    const plan = debtPlans[strategy];
-                    const other = debtPlans[strategy === 'avalanche' ? 'snowball' : 'avalanche'];
-                    const better = plan.totalInterestPaid <= other.totalInterestPaid;
-                    return (
-                      <div className="card" key={strategy} style={{ background: 'var(--surface-sunken)' }}>
-                        <div className="row-between" style={{ marginBottom: 11 }}>
-                          <span className="card-title" style={{ textTransform: 'capitalize' }}>
-                            {strategy}
-                          </span>
-                          {better && <Badge tone="positive">costs less</Badge>}
-                        </div>
-                        <div className="grid grid-2" style={{ gap: 12 }}>
-                          <Stat
-                            label={plan.clearsEverything ? 'Debt free in' : 'Clears what it can in'}
-                            value={`${plan.monthsToDebtFree} mo`}
-                            meta={
-                              plan.clearsEverything
-                                ? `${(plan.monthsToDebtFree / 12).toFixed(1)} years`
-                                : `${plan.order.length} of ${profile.liabilities.length} debts`
-                            }
-                            tone={plan.clearsEverything ? 'neutral' : 'warning'}
-                          />
-                          <Stat
-                            label="Total interest"
-                            value={formatCompact(plan.totalInterestPaid, currency)}
-                            tone={better ? 'positive' : 'negative'}
-                          />
-                        </div>
-                        <div className="divider" style={{ margin: '12px 0' }} />
-                        <div className="stack-sm">
-                          {plan.order.map((o, idx) => (
-                            <div className="row-between text-sm" key={o.liabilityId}>
-                              <span className="text-muted">
-                                {idx + 1}. {o.name}
-                              </span>
-                              <span className="num text-xs text-subtle">month {o.payoffMonth}</span>
-                            </div>
-                          ))}
-                        </div>
-                      </div>
-                    );
-                  })}
-                </div>
-
-                <Callout tone="info">
-                  Avalanche saves{' '}
-                  <strong>
-                    {formatCompact(
-                      Math.abs(debtPlans.snowball.totalInterestPaid - debtPlans.avalanche.totalInterestPaid),
-                      currency,
-                    )}
-                  </strong>{' '}
-                  in interest over snowball here. If the gap is small, pick the one you will stick to —
-                  a plan abandoned halfway costs more than either.
-                </Callout>
+                </CardSection>
               </>
             )}
           </>

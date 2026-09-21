@@ -11,7 +11,7 @@ import {
 } from '@wealth/shared';
 import { api } from '../lib/api';
 import { useLoadedProfile, useProfile } from '../state/ProfileContext';
-import { Badge, Callout, Card, Slider, Stat } from '../components/ui';
+import { Callout, Card, Slider, Stat } from '../components/ui';
 import { RiskLadder, useRiskLadder } from '../components/RiskLadder';
 
 /**
@@ -170,7 +170,7 @@ export function Assumptions() {
             />
           </div>
 
-          <div className="divider" style={{ margin: '16px 0' }} />
+          <hr className="divider" />
 
           <div className="stack-sm">
             <div className="row-between text-sm">
@@ -185,7 +185,7 @@ export function Assumptions() {
               <span className="text-muted">Emergency fund target</span>
               <span className="num">{formatCompact(snapshot.cashflow.emergencyFundTarget, currency)}</span>
             </div>
-            <p className="text-xs text-subtle" style={{ marginTop: 4 }}>
+            <p className="text-xs text-subtle mt-1">
               Worth trying: drop the withdrawal rate from 3.5% to 3% and watch the required corpus
               jump by about a sixth. That sensitivity is exactly why the assumption is shown rather
               than buried.
@@ -246,7 +246,7 @@ export function Assumptions() {
           the aspirational weight and a nice-to-have really will take money from a must-have. The
           split this produces is on the Goals page, with what it costs the goals that lose.
         </p>
-        <div className="grid grid-2" style={{ marginTop: 12 }}>
+        <div className="grid grid-2">
           <div className="stack">
             <Slider
               label={`Must-have weight ${isOverridden('goalWeightMustHave') ? '(yours)' : '(house view)'}`}
@@ -304,7 +304,7 @@ export function Assumptions() {
           <span className="num">{HEALTH_COVER_AGE_BANDS.youngMaxAge}</span> and{' '}
           <span className="num">{HEALTH_COVER_AGE_BANDS.midMaxAge}</span>.
         </p>
-        <div className="grid grid-2" style={{ marginTop: 12 }}>
+        <div className="grid grid-2">
           <div className="stack">
             <Slider
               label={`Cover as a multiple of income ${isOverridden('healthCoverIncomeMultiple') ? '(yours)' : '(house view)'}`}
@@ -358,7 +358,7 @@ export function Assumptions() {
           </div>
         </div>
 
-        <div className="divider" style={{ margin: '16px 0' }} />
+        <hr className="divider" />
 
         <div className="stack-sm">
           <div className="row-between text-sm">
@@ -370,13 +370,13 @@ export function Assumptions() {
             <span className="num">{formatCompact(profile.healthInsuranceCover ?? 0, currency)}</span>
           </div>
           {healthGap > 0 ? (
-            <p className="text-xs text-subtle" style={{ marginTop: 4 }}>
+            <p className="text-xs text-subtle mt-1">
               A {formatCompact(healthGap, currency)} gap is not only an insurance question: an
               uncovered event is paid out of savings, so while it is open the emergency fund is
               effectively carrying it too.
             </p>
           ) : (
-            <p className="text-xs text-subtle" style={{ marginTop: 4 }}>
+            <p className="text-xs text-subtle mt-1">
               Cover is at or above the target these figures imply, so no health-cover action appears
               in your list.
             </p>
@@ -395,7 +395,7 @@ export function Assumptions() {
           and adding a low-correlation asset can reduce total risk even when that asset is volatile
           on its own.
         </p>
-        <div className="table-wrap" style={{ marginTop: 14 }}>
+        <div className="table-wrap">
           <table className="data">
             <thead>
               <tr>
@@ -434,13 +434,15 @@ export function Assumptions() {
             </tbody>
           </table>
         </div>
-        <details className="disclosure" style={{ marginTop: 14 }}>
+        <details className="disclosure">
           <summary>Correlation matrix</summary>
           <div className="disclosure-body table-wrap">
             <table className="data">
               <thead>
                 <tr>
-                  <th />
+                  <th>
+                    <span className="sr-only">Asset class</span>
+                  </th>
                   {ASSET_CLASSES.map((ac) => (
                     <th key={ac} className="right">
                       {ASSET_LABELS[ac].split(' ')[0]}
@@ -462,17 +464,15 @@ export function Assumptions() {
                       return (
                         <td
                           key={b}
-                          className="right num"
-                          style={{
-                            color:
-                              a === b
-                                ? 'var(--text-subtle)'
-                                : value < 0
-                                  ? 'var(--positive)'
-                                  : value > 0.5
-                                    ? 'var(--warning)'
-                                    : 'var(--text-muted)',
-                          }}
+                          className={`right num ${
+                            a === b
+                              ? 'text-subtle'
+                              : value < 0
+                                ? 'text-positive'
+                                : value > 0.5
+                                  ? 'text-warning'
+                                  : 'text-muted'
+                          }`}
                         >
                           {value.toFixed(2)}
                         </td>
@@ -482,7 +482,7 @@ export function Assumptions() {
                 ))}
               </tbody>
             </table>
-            <p className="text-xs text-subtle" style={{ marginTop: 10 }}>
+            <p className="text-xs text-subtle mt-3">
               Negative values (shown in green) are where the diversification benefit comes from —
               equity and gold at −0.10 means gold tends to hold up when equity falls. Values above
               0.5 (amber) mean those two assets largely move together, so holding both adds less
@@ -496,15 +496,20 @@ export function Assumptions() {
         title="What the assistant knows"
         subtitle={`${knowledge.length} reference notes the agent retrieves from when explaining a recommendation`}
       >
-        <div className="row-wrap">
-          {knowledge.map((doc) => (
-            <Badge key={doc.id}>{doc.title}</Badge>
-          ))}
-          {knowledge.length === 0 && (
-            <span className="text-sm text-subtle">Knowledge base unavailable.</span>
-          )}
-        </div>
-        <p className="text-xs text-subtle" style={{ marginTop: 12 }}>
+        {knowledge.length > 0 ? (
+          // Chips, not badges: a badge never wraps, and the longer titles pushed
+          // the page sideways on a phone.
+          <ul className="list-plain row-wrap gap-2">
+            {knowledge.map((doc) => (
+              <li className="chip" key={doc.id}>
+                {doc.title}
+              </li>
+            ))}
+          </ul>
+        ) : (
+          <p className="text-sm text-subtle">Knowledge base unavailable.</p>
+        )}
+        <p className="text-xs text-subtle">
           Retrieval is lexical (BM25) over this small, curated corpus rather than an embedding
           index. At this size an embedding store would add a network hop, a cold-start cost and an
           availability dependency in exchange for no measurable gain — and lexical search works
@@ -513,7 +518,7 @@ export function Assumptions() {
       </Card>
 
       <Card title="What is deliberately not modelled" subtitle="Stated plainly, because an unstated omission is a misleading result">
-        <div className="grid grid-2" style={{ gap: 10 }}>
+        <dl className="grid grid-2 gap-3">
           {[
             ['Taxes', 'No capital gains, dividend or income tax is applied to any projection. Real after-tax outcomes are lower.'],
             ['Transaction costs', 'Brokerage, exit loads, bid-ask spreads and rebalancing costs are all excluded.'],
@@ -525,11 +530,11 @@ export function Assumptions() {
             ['Behaviour', 'The projections assume you keep contributing through every drawdown. Most people do not.'],
           ].map(([title, detail]) => (
             <div key={title}>
-              <div className="text-sm strong">{title}</div>
-              <div className="text-xs text-muted">{detail}</div>
+              <dt className="text-sm strong">{title}</dt>
+              <dd className="text-xs text-muted">{detail}</dd>
             </div>
           ))}
-        </div>
+        </dl>
       </Card>
     </div>
   );

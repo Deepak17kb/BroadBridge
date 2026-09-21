@@ -27,6 +27,7 @@ import {
   type PortfolioAnalysis,
   type WellnessScore,
 } from '@wealth/shared';
+import { useMediaQuery } from '../../hooks/useMediaQuery';
 
 /**
  * The chart layer.
@@ -43,6 +44,8 @@ import {
  *    zero rather than two bars the reader has to subtract.
  *  - Every chart carries a legend or direct labels plus a table view, so no
  *    value is reachable by colour or hover alone.
+ *  - Hovering shows the tooltip card and nothing else: no cursor band behind
+ *    the category, no highlighted bar. The card is the readout.
  *
  * Series colours come from CSS custom properties, which is what lets one theme
  * switch restyle every chart with no JavaScript involved.
@@ -67,19 +70,56 @@ export const ASSET_COLOUR: Record<AssetClass, string> = {
   cash: SERIES_VARS[5],
 };
 
+/**
+ * Axis labels: muted, in the figure face. `fill` colours tick text; a `stroke`
+ * here outlines every glyph, which is what made the labels look heavy.
+ *
+ * `width` switches off Recharts' label wrapping. It measures a label in the
+ * page's body font rather than this one, so it broke "₹35.00 L" over two
+ * lines with room to spare; the axes are sized to their labels instead.
+ */
 const AXIS = {
-  stroke: 'var(--text-subtle)',
+  fill: 'var(--text-subtle)',
   fontSize: 11,
   fontFamily: 'var(--font-mono)',
+  width: 1000,
 } as const;
 
-function Tip({ label, rows }: { label: string; rows: { name: string; value: string; colour?: string }[] }) {
+/** Smaller labels on a phone; the axes then thin them to fit. */
+const AXIS_NARROW = { ...AXIS, fontSize: 10 } as const;
+
+/** Every tooltip: the card only, and no easing lag behind the pointer. */
+const TOOLTIP = { cursor: false, isAnimationActive: false } as const;
+
+function useChartAxis() {
+  const narrow = useMediaQuery('(max-width: 479px)');
+  return { narrow, tick: narrow ? AXIS_NARROW : AXIS };
+}
+
+/**
+ * Room for an axis of figures. The tick face is monospaced - every character
+ * is 0.6em wide - so the widest label is measured from its length, and no
+ * label wraps ("₹16.16" over "Cr") for want of a few pixels.
+ */
+function axisWidth(labels: string[], fontSize: number): number {
+  const longest = Math.max(1, ...labels.map((label) => label.length));
+  return Math.ceil(longest * fontSize * 0.6) + 12;
+}
+
+/** The glass card a chart shows on hover: a heading, then label and value rows. */
+export function ChartTooltip({
+  label,
+  rows,
+}: {
+  label: string;
+  rows: { name: string; value: string; colour?: string }[];
+}) {
   return (
     <div className="tooltip">
       <div className="tooltip-label">{label}</div>
       {rows.map((r) => (
         <div className="tooltip-row" key={r.name}>
-          <span className="row" style={{ gap: 6 }}>
+          <span className="row gap-2">
             {r.colour && <span className="dot" style={{ background: r.colour }} />}
             <span className="text-muted">{r.name}</span>
           </span>
@@ -87,6 +127,24 @@ function Tip({ label, rows }: { label: string; rows: { name: string; value: stri
         </div>
       ))}
     </div>
+  );
+}
+
+function LegendItem({
+  colour,
+  line = false,
+  children,
+}: {
+  colour: string;
+  /** A short rule instead of a dot, for a reference line. */
+  line?: boolean;
+  children: ReactNode;
+}) {
+  return (
+    <span className="legend-item">
+      <span className={line ? 'legend-line' : 'dot'} style={{ background: colour }} />
+      {children}
+    </span>
   );
 }
 
@@ -111,6 +169,7 @@ export function MonteCarloFan({
   currency: Currency;
   height?: number;
 }) {
+  const { narrow, tick } = useChartAxis();
   const data = useMemo(
     () =>
       result.bands.map((b) => ({
@@ -127,19 +186,28 @@ export function MonteCarloFan({
       })),
     [result.bands],
   );
+  // The top tick is rounded up to a "nice" value, so size for a little above the data.
+  const top = Math.max(result.target, ...result.bands.map((b) => b.p90));
+  const yWidth = axisWidth(
+    [formatCompact(top, currency), formatCompact(top * 1.5, currency)],
+    tick.fontSize,
+  );
 
   return (
     <div>
       <div className="chart-frame" style={{ height }}>
         <ResponsiveContainer width="100%" height="100%">
-          <AreaChart data={data} margin={{ top: 6, right: 10, left: 4, bottom: 2 }}>
+          {/* Right margin leaves room for the last year label, centred on the edge. */}
+          <AreaChart data={data} margin={{ top: 6, right: 16, left: 4, bottom: 2 }}>
             {/* Solid hairline grid - a dashed grid reads as a threshold line. */}
             <CartesianGrid stroke="var(--grid)" strokeDasharray="0" vertical={false} />
             <XAxis
               dataKey="year"
-              tick={AXIS}
+              tick={tick}
               tickLine={false}
               axisLine={{ stroke: 'var(--grid)' }}
+              interval="preserveStartEnd"
+              minTickGap={narrow ? 14 : 8}
               label={{
                 value: 'Years from now',
                 position: 'insideBottom',
@@ -149,19 +217,20 @@ export function MonteCarloFan({
               }}
             />
             <YAxis
-              tick={AXIS}
+              tick={tick}
               tickLine={false}
               axisLine={false}
-              width={58}
+              width={yWidth}
               tickFormatter={(v: number) => formatCompact(v, currency)}
             />
             <Tooltip
+              {...TOOLTIP}
               content={({ active, payload, label }) => {
                 if (!active || !payload?.length) return null;
                 const d = payload[0]?.payload as (typeof data)[number] | undefined;
                 if (!d) return null;
                 return (
-                  <Tip
+                  <ChartTooltip
                     label={`Year ${label}`}
                     rows={[
                       { name: 'Best case (90th)', value: formatCompact(d.p90, currency), colour: 'var(--seq-300)' },
@@ -180,6 +249,7 @@ export function MonteCarloFan({
               dataKey="base10"
               stackId="fan"
               stroke="none"
+              activeDot={false}
               fill="transparent"
               isAnimationActive={false}
             />
@@ -188,6 +258,7 @@ export function MonteCarloFan({
               dataKey="band10to25"
               stackId="fan"
               stroke="none"
+              activeDot={false}
               fill="var(--seq-100)"
               fillOpacity={0.55}
               isAnimationActive={false}
@@ -197,6 +268,7 @@ export function MonteCarloFan({
               dataKey="band25to75"
               stackId="fan"
               stroke="none"
+              activeDot={false}
               fill="var(--seq-300)"
               fillOpacity={0.6}
               isAnimationActive={false}
@@ -206,6 +278,7 @@ export function MonteCarloFan({
               dataKey="band75to90"
               stackId="fan"
               stroke="none"
+              activeDot={false}
               fill="var(--seq-100)"
               fillOpacity={0.55}
               isAnimationActive={false}
@@ -216,6 +289,7 @@ export function MonteCarloFan({
               stroke="var(--seq-700)"
               strokeWidth={2}
               dot={false}
+              activeDot={false}
               isAnimationActive={false}
             />
             {result.target > 0 && (
@@ -235,19 +309,11 @@ export function MonteCarloFan({
           </AreaChart>
         </ResponsiveContainer>
       </div>
-      <div className="legend" style={{ marginTop: 8 }}>
-        <span className="legend-item">
-          <span className="dot" style={{ background: 'var(--seq-700)' }} /> Median path
-        </span>
-        <span className="legend-item">
-          <span className="dot" style={{ background: 'var(--seq-300)' }} /> Middle 50% of outcomes
-        </span>
-        <span className="legend-item">
-          <span className="dot" style={{ background: 'var(--seq-100)' }} /> 10th-90th percentile
-        </span>
-        <span className="legend-item">
-          <span className="dot" style={{ background: 'var(--warning)' }} /> Target
-        </span>
+      <div className="legend mt-2">
+        <LegendItem colour="var(--seq-700)">Median path</LegendItem>
+        <LegendItem colour="var(--seq-300)">Middle 50% of outcomes</LegendItem>
+        <LegendItem colour="var(--seq-100)">10th-90th percentile</LegendItem>
+        <LegendItem colour="var(--warning)">Target</LegendItem>
       </div>
     </div>
   );
@@ -263,6 +329,7 @@ export function OutcomeHistogram({
   currency: Currency;
   height?: number;
 }) {
+  const { narrow, tick } = useChartAxis();
   const data = result.histogram.map((b) => ({
     label: formatCompact(b.bucketStart, currency),
     start: b.bucketStart,
@@ -279,15 +346,22 @@ export function OutcomeHistogram({
         <ResponsiveContainer width="100%" height="100%">
           <BarChart data={data} margin={{ top: 4, right: 10, left: 0, bottom: 0 }} barCategoryGap={2}>
             <CartesianGrid stroke="var(--grid)" strokeDasharray="0" vertical={false} />
-            <XAxis dataKey="label" tick={AXIS} tickLine={false} axisLine={{ stroke: 'var(--grid)' }} interval={3} />
-            <YAxis tick={AXIS} tickLine={false} axisLine={false} width={34} />
+            <XAxis
+              dataKey="label"
+              tick={tick}
+              tickLine={false}
+              axisLine={{ stroke: 'var(--grid)' }}
+              interval={narrow ? 5 : 3}
+            />
+            <YAxis tick={tick} tickLine={false} axisLine={false} width={34} />
             <Tooltip
+              {...TOOLTIP}
               content={({ active, payload }) => {
                 if (!active || !payload?.length) return null;
                 const d = payload[0]?.payload as (typeof data)[number] | undefined;
                 if (!d) return null;
                 return (
-                  <Tip
+                  <ChartTooltip
                     label={`${formatCompact(d.start, currency)} - ${formatCompact(d.end, currency)}`}
                     rows={[
                       { name: 'Simulated paths', value: String(d.count) },
@@ -306,13 +380,9 @@ export function OutcomeHistogram({
           </BarChart>
         </ResponsiveContainer>
       </div>
-      <div className="legend" style={{ marginTop: 6 }}>
-        <span className="legend-item">
-          <span className="dot" style={{ background: 'var(--seq-500)' }} /> Meets the target
-        </span>
-        <span className="legend-item">
-          <span className="dot" style={{ background: 'var(--negative)' }} /> Falls short
-        </span>
+      <div className="legend mt-2">
+        <LegendItem colour="var(--seq-500)">Meets the target</LegendItem>
+        <LegendItem colour="var(--negative)">Falls short</LegendItem>
       </div>
     </div>
   );
@@ -328,6 +398,7 @@ export function OutcomeHistogram({
  * Segments are separated by a 2px surface gap rather than a stroke, and only
  * segments wide enough to hold text are labelled in place - a clipped label is
  * worse than no label, and the table below carries every value regardless.
+ * Hovering a segment names it above the bar; the bar itself does not change.
  */
 export function AllocationBar({
   weights,
@@ -346,7 +417,7 @@ export function AllocationBar({
 
   return (
     <div>
-      <div className="row-between" style={{ marginBottom: 6 }}>
+      <div className="row-between mb-2">
         <span className="text-sm strong">{label}</span>
         {hovered && (
           <span className="text-xs text-muted">
@@ -355,18 +426,18 @@ export function AllocationBar({
           </span>
         )}
       </div>
-      <div className="composition" role="img" aria-label={`${label}: ${present.map((ac) => `${ASSET_LABELS[ac]} ${((weights[ac] ?? 0) * 100).toFixed(0)}%`).join(', ')}`}>
+      <div
+        className="composition"
+        role="img"
+        aria-label={`${label}: ${present.map((ac) => `${ASSET_LABELS[ac]} ${((weights[ac] ?? 0) * 100).toFixed(0)}%`).join(', ')}`}
+      >
         {present.map((ac) => {
           const pct = (weights[ac] ?? 0) * 100;
           return (
             <div
               key={ac}
               className="composition-segment"
-              style={{
-                flex: `0 0 calc(${pct}% - 2px)`,
-                background: ASSET_COLOUR[ac],
-                opacity: hovered && hovered !== ac ? 0.45 : 1,
-              }}
+              style={{ flex: `0 0 calc(${pct}% - 2px)`, background: ASSET_COLOUR[ac] }}
               onMouseEnter={() => setHovered(ac)}
               onMouseLeave={() => setHovered(null)}
             >
@@ -382,12 +453,11 @@ export function AllocationBar({
 
 export function AllocationLegend({ weights }: { weights: AllocationWeights }) {
   return (
-    <div className="legend" style={{ marginTop: 10 }}>
+    <div className="legend mt-3">
       {ASSET_CLASSES.filter((ac) => (weights[ac] ?? 0) > 0.001).map((ac) => (
-        <span className="legend-item" key={ac}>
-          <span className="dot" style={{ background: ASSET_COLOUR[ac] }} />
+        <LegendItem key={ac} colour={ASSET_COLOUR[ac]}>
           {ASSET_LABELS[ac]}
-        </span>
+        </LegendItem>
       ))}
     </div>
   );
@@ -428,28 +498,20 @@ export function DriftChart({
             >
               <span className="drift-zero" />
               <span
-                className="drift-bar"
-                style={{
-                  background: over ? 'var(--warning)' : 'var(--info)',
-                  width: `${width}%`,
-                  left: over ? '50%' : `calc(50% - ${width}%)`,
-                }}
+                className={`drift-bar ${over ? 'over' : 'under'}`}
+                style={{ width: `${width}%`, left: over ? '50%' : `calc(50% - ${width}%)` }}
               />
             </div>
-            <span className={`text-xs num ${over ? 'text-warning' : ''}`} style={{ textAlign: 'right' }}>
+            <span className={`text-xs num text-right ${over ? 'text-warning' : ''}`.trim()}>
               {over ? '+' : ''}
               {(d.deltaPct * 100).toFixed(1)} pt
             </span>
           </div>
         );
       })}
-      <div className="legend" style={{ marginTop: 4 }}>
-        <span className="legend-item">
-          <span className="dot" style={{ background: 'var(--info)' }} /> Below target
-        </span>
-        <span className="legend-item">
-          <span className="dot" style={{ background: 'var(--warning)' }} /> Above target
-        </span>
+      <div className="legend mt-1">
+        <LegendItem colour="var(--info)">Below target</LegendItem>
+        <LegendItem colour="var(--warning)">Above target</LegendItem>
         <span className="text-xs text-subtle">
           {portfolio.totalDriftPct}% of the portfolio needs to move · trades shown below
         </span>
@@ -492,8 +554,11 @@ export function GoalFundingChart({
   currency: Currency;
   height?: number;
 }) {
+  const { narrow, tick } = useChartAxis();
+  // Every bar keeps its name, so on a phone the names are cut shorter instead.
+  const nameLimit = narrow ? 10 : 17;
   const data = projections.map((p) => ({
-    name: p.goalName.length > 17 ? `${p.goalName.slice(0, 16)}…` : p.goalName,
+    name: p.goalName.length > nameLimit ? `${p.goalName.slice(0, nameLimit - 1)}…` : p.goalName,
     fullName: p.goalName,
     fundedPct: fundedPercent(p),
     projected: p.projectedCorpus,
@@ -510,27 +575,31 @@ export function GoalFundingChart({
           {/* Top margin leaves room for the value label over a bar that reaches the top. */}
           <BarChart data={data} margin={{ top: 20, right: 12, left: 4, bottom: 4 }}>
             <CartesianGrid stroke="var(--grid)" strokeDasharray="0" vertical={false} />
-            <XAxis dataKey="name" tick={{ ...AXIS, fontFamily: 'var(--font)' }} tickLine={false} axisLine={{ stroke: 'var(--grid)' }} />
+            <XAxis
+              dataKey="name"
+              tick={{ ...tick, fontFamily: 'var(--font)' }}
+              tickLine={false}
+              axisLine={{ stroke: 'var(--grid)' }}
+              interval={0}
+            />
             <YAxis
-              tick={AXIS}
+              tick={tick}
               tickLine={false}
               axisLine={false}
-              width={58}
+              width={axisWidth(ticks.map((t) => `${t}%`), tick.fontSize)}
               domain={[0, top]}
               ticks={ticks}
               interval={0}
               tickFormatter={(v: number) => `${v}%`}
             />
             <Tooltip
-              // No hover highlight at all - only the tooltip card. Recharts
-              // otherwise draws a solid #ccc block behind the hovered category.
-              cursor={false}
+              {...TOOLTIP}
               content={({ active, payload }) => {
                 if (!active || !payload?.length) return null;
                 const d = payload[0]?.payload as (typeof data)[number] | undefined;
                 if (!d) return null;
                 return (
-                  <Tip
+                  <ChartTooltip
                     label={d.fullName}
                     rows={[
                       { name: 'Needed at goal date', value: formatCompact(d.target, currency), colour: 'var(--text-subtle)' },
@@ -565,20 +634,16 @@ export function GoalFundingChart({
                 position="top"
                 formatter={(v: number) => `${Math.round(v)}%`}
                 fill="var(--text)"
-                fontSize={11}
+                fontSize={tick.fontSize}
                 fontFamily="var(--font-mono)"
               />
             </Bar>
           </BarChart>
         </ResponsiveContainer>
       </div>
-      <div className="legend" style={{ marginTop: 8 }}>
-        <span className="legend-item">
-          <span className="dot" style={{ background: 'var(--positive)' }} /> Projected - on track
-        </span>
-        <span className="legend-item">
-          <span className="dot" style={{ background: 'var(--negative)' }} /> Projected - short
-        </span>
+      <div className="legend mt-2">
+        <LegendItem colour="var(--positive)">Projected - on track</LegendItem>
+        <LegendItem colour="var(--negative)">Projected - short</LegendItem>
       </div>
     </div>
   );
@@ -598,7 +663,7 @@ export function PillarMeters({ wellness }: { wellness: WellnessScore }) {
         const tone = p.score >= 80 ? 'positive' : p.score >= 55 ? 'warning' : 'negative';
         return (
           <div key={p.name}>
-            <div className="row-between" style={{ marginBottom: 4 }}>
+            <div className="row-between mb-1">
               <span className="text-sm">
                 {p.name}{' '}
                 <span className="text-xs text-subtle">({(p.weight * 100).toFixed(0)}% of score)</span>
@@ -630,9 +695,7 @@ export function PillarMeters({ wellness }: { wellness: WellnessScore }) {
                 />
               )}
             </div>
-            <div className="text-xs text-subtle" style={{ marginTop: 3 }}>
-              {p.summary}
-            </div>
+            <div className="text-xs text-subtle mt-1">{p.summary}</div>
           </div>
         );
       })}
@@ -652,29 +715,20 @@ export function ExpenseBars({
   return (
     <div className="stack-sm">
       {breakdown.map((b, i) => (
-        <div className="composition-row" key={b.category}>
-          <span className="text-sm text-muted" title={b.category} style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+        <div className="expense-row" key={b.category}>
+          <span className="text-muted truncate" title={b.category}>
             {b.category}
           </span>
-          <div className="row" style={{ gap: 9 }}>
-            <div className="bar" style={{ flex: 1, height: 9 }}>
-              {/* One hue: this is magnitude, not identity. The largest category
-                  is emphasised so the eye lands on what matters. */}
-              <div
-                className="bar-fill"
-                style={{
-                  width: `${(b.amount / max) * 100}%`,
-                  background: i === 0 ? 'var(--series-1)' : 'var(--seq-300)',
-                }}
-              />
-            </div>
-            <span className="text-sm num" style={{ minWidth: 72, textAlign: 'right' }}>
-              {formatCompact(b.amount, currency)}
-            </span>
-            <span className="text-xs text-subtle num" style={{ minWidth: 40, textAlign: 'right' }}>
-              {(b.sharePct * 100).toFixed(0)}%
-            </span>
-          </div>
+          {/* One hue: this is magnitude, not identity. The largest category
+              is emphasised so the eye lands on what matters. */}
+          <span className="bar expense-track">
+            <span
+              className={`bar-fill ${i === 0 ? 'lead' : 'rest'}`}
+              style={{ width: `${(b.amount / max) * 100}%` }}
+            />
+          </span>
+          <span className="num text-right">{formatCompact(b.amount, currency)}</span>
+          <span className="text-xs text-subtle num text-right">{(b.sharePct * 100).toFixed(0)}%</span>
         </div>
       ))}
     </div>
@@ -689,46 +743,58 @@ export function ScenarioComparison({
   rows,
   baseline,
   currency,
-  height = 230,
+  height,
 }: {
   rows: { label: string; value: number; delta: number }[];
   baseline: number;
   currency: Currency;
+  /** By default the chart is as tall as its rows need. */
   height?: number;
 }) {
+  const { narrow, tick } = useChartAxis();
+  const nameLimit = narrow ? 16 : 26;
   const data = rows.map((r) => ({
     ...r,
-    name: r.label.length > 26 ? `${r.label.slice(0, 25)}…` : r.label,
+    name: r.label.length > nameLimit ? `${r.label.slice(0, nameLimit - 1)}…` : r.label,
   }));
+  // A fixed height left two bars floating in a tall empty frame.
+  const frameHeight = height ?? Math.max(136, data.length * 36 + 60);
 
   return (
     <div>
-      <div className="chart-frame" style={{ height }}>
+      <div className="chart-frame" style={{ height: frameHeight }}>
         <ResponsiveContainer width="100%" height="100%">
-          <BarChart data={data} layout="vertical" margin={{ top: 4, right: 58, left: 4, bottom: 4 }}>
+          {/* Top margin holds the "Today" label over the baseline. */}
+          <BarChart
+            data={data}
+            layout="vertical"
+            margin={{ top: 20, right: narrow ? 28 : 58, left: 4, bottom: 4 }}
+          >
             <CartesianGrid stroke="var(--grid)" strokeDasharray="0" horizontal={false} />
             <XAxis
               type="number"
-              tick={AXIS}
+              tick={tick}
               tickLine={false}
               axisLine={{ stroke: 'var(--grid)' }}
+              tickCount={narrow ? 3 : 5}
               tickFormatter={(v: number) => formatCompact(v, currency)}
             />
             <YAxis
               type="category"
               dataKey="name"
-              tick={{ ...AXIS, fontFamily: 'var(--font)', fontSize: 11 }}
+              tick={{ ...tick, fontFamily: 'var(--font)' }}
               tickLine={false}
               axisLine={false}
-              width={168}
+              width={narrow ? 112 : 168}
             />
             <Tooltip
+              {...TOOLTIP}
               content={({ active, payload }) => {
                 if (!active || !payload?.length) return null;
                 const d = payload[0]?.payload as (typeof data)[number] | undefined;
                 if (!d) return null;
                 return (
-                  <Tip
+                  <ChartTooltip
                     label={d.label}
                     rows={[
                       { name: 'Retirement corpus', value: formatCompact(d.value, currency) },
@@ -761,16 +827,12 @@ export function ScenarioComparison({
           </BarChart>
         </ResponsiveContainer>
       </div>
-      <div className="legend" style={{ marginTop: 6 }}>
-        <span className="legend-item">
-          <span className="dot" style={{ background: 'var(--positive)' }} /> Better than today's plan
-        </span>
-        <span className="legend-item">
-          <span className="dot" style={{ background: 'var(--negative)' }} /> Worse
-        </span>
-        <span className="legend-item">
-          <span style={{ width: 12, height: 2, background: 'var(--text-subtle)' }} /> Current plan
-        </span>
+      <div className="legend mt-2">
+        <LegendItem colour="var(--positive)">Better than today's plan</LegendItem>
+        <LegendItem colour="var(--negative)">Worse</LegendItem>
+        <LegendItem colour="var(--text-subtle)" line>
+          Current plan
+        </LegendItem>
       </div>
     </div>
   );
@@ -792,7 +854,7 @@ export function TableToggle({
   label?: string;
 }) {
   return (
-    <details className="disclosure" style={{ marginTop: 12 }}>
+    <details className="disclosure">
       <summary>{label}</summary>
       <div className="disclosure-body table-wrap">{children}</div>
     </details>

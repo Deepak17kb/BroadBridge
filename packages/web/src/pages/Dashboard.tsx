@@ -10,7 +10,16 @@ import {
 } from '@wealth/shared';
 import { api } from '../lib/api';
 import { useLoadedProfile } from '../state/ProfileContext';
-import { AssumptionList, Badge, Callout, Card, ProgressBar, ScoreRing, Stat } from '../components/ui';
+import {
+  AnimatedNumber,
+  AssumptionList,
+  Badge,
+  Callout,
+  Card,
+  ProgressBar,
+  ScoreRing,
+  Stat,
+} from '../components/ui';
 import { ImpactHero } from '../components/ImpactHero';
 import {
   AllocationBar,
@@ -37,6 +46,7 @@ export function Dashboard() {
   const { cashflow, netWorth, portfolio, retirement, wellness, risk, goalProjections } = snapshot;
 
   const onTrack = goalProjections.filter((g) => g.onTrack).length;
+  const money = (v: number) => formatCompact(v, currency);
   // The dashboard is a summary surface: three is enough to act on, and the
   // full ranked list lives one click away on /actions.
   const topActions: NextBestAction[] = snapshot.actions.slice(0, 3);
@@ -102,8 +112,8 @@ export function Dashboard() {
               : 'Based on partial information — some pillars could not be scored'
           }
         >
-          <div className="row" style={{ gap: 22, alignItems: 'flex-start' }}>
-            <div className="stack-sm" style={{ alignItems: 'center' }}>
+          <div className="wellness-summary">
+            <div className="stack-sm">
               <ScoreRing score={wellness.total} grade={wellness.dataComplete ? wellness.grade : undefined} />
               {wellness.dataComplete ? (
                 <Badge tone={wellness.total >= 65 ? 'positive' : wellness.total >= 45 ? 'warning' : 'negative'}>
@@ -120,17 +130,15 @@ export function Dashboard() {
                 <Badge tone="warning">Incomplete</Badge>
               )}
             </div>
-            <div style={{ flex: 1, minWidth: 0 }}>
+            <div className="wellness-pillars">
               <PillarMeters wellness={wellness} />
             </div>
           </div>
           {!wellness.dataComplete && (
-            <div style={{ marginTop: 14 }}>
-              <Callout tone="info">
-                This score is provisional. Add {wellness.missing.join(', ')} and it will reflect your
-                real position — <Link to="/profile">complete your details</Link>.
-              </Callout>
-            </div>
+            <Callout tone="info">
+              This score is provisional. Add {wellness.missing.join(', ')} and it will reflect your
+              real position — <Link to="/profile">complete your details</Link>.
+            </Callout>
           )}
         </Card>
 
@@ -185,7 +193,7 @@ export function Dashboard() {
         <Card>
           <Stat
             label="Net worth"
-            value={formatCompact(netWorth.netWorth, currency)}
+            value={<AnimatedNumber value={netWorth.netWorth} format={money} />}
             meta={`${formatCompact(netWorth.assets, currency)} assets − ${formatCompact(netWorth.liabilities, currency)} debt`}
             tone={netWorth.netWorth >= 0 ? 'neutral' : 'negative'}
           />
@@ -193,7 +201,7 @@ export function Dashboard() {
         <Card>
           <Stat
             label="Monthly surplus"
-            value={formatCompact(cashflow.monthlySurplus, currency)}
+            value={<AnimatedNumber value={cashflow.monthlySurplus} format={money} />}
             meta={
               cashflow.monthlySurplus >= 0
                 ? `Saving ${formatPercent(cashflow.savingsRatePct, 0)} of income`
@@ -205,7 +213,7 @@ export function Dashboard() {
         <Card>
           <Stat
             label="Emergency cover"
-            value={`${cashflow.emergencyFundMonths.toFixed(1)} mo`}
+            value={<AnimatedNumber value={cashflow.emergencyFundMonths} format={(v) => `${v.toFixed(1)} mo`} />}
             meta={
               cashflow.emergencyFundGap > 0
                 ? `${formatCompact(cashflow.emergencyFundGap, currency)} short of ${snapshot.assumptions.emergencyFundMonths} months`
@@ -223,7 +231,7 @@ export function Dashboard() {
         <Card>
           <Stat
             label="Retirement funded"
-            value={formatPercent(retirement.readinessRatio, 0)}
+            value={<AnimatedNumber value={retirement.readinessRatio} format={(v) => formatPercent(v, 0)} />}
             meta={`${formatCompact(retirement.projectedCorpus, currency)} of ${formatCompact(retirement.corpusRequired, currency)} needed`}
             tone={
               retirement.readinessRatio >= 0.9
@@ -287,7 +295,7 @@ export function Dashboard() {
                       <td className="right num">{formatCompact(g.requiredMonthly, currency)}</td>
                       <td>
                         <Badge tone={g.onTrack ? 'positive' : 'negative'}>
-                          {g.onTrack ? 'On track' : `Short ${formatCompact(Math.abs(g.surplus), currency)}`}
+                          {g.onTrack ? 'On track' : `Short by ${formatCompact(Math.abs(g.surplus), currency)}`}
                         </Badge>
                       </td>
                     </tr>
@@ -306,11 +314,11 @@ export function Dashboard() {
         >
           <ExpenseBars breakdown={cashflow.expenseBreakdown} currency={currency} />
           {cashflow.totalEmi > 0 && (
-            <div className="text-xs text-subtle" style={{ marginTop: 11 }}>
+            <p className="text-xs text-subtle">
               Plus {formatCompact(cashflow.totalEmi, currency)} of loan EMIs, which is{' '}
               {formatPercent(cashflow.debtToIncomeRatio, 0)} of your income. Lenders start to worry past
               40%.
-            </div>
+            </p>
           )}
         </Card>
 
@@ -339,7 +347,7 @@ export function Dashboard() {
             <AllocationLegend weights={portfolio.weights} />
           </div>
 
-          <div className="grid grid-3" style={{ marginTop: 16, gap: 12 }}>
+          <div className="grid grid-3">
             <Stat
               label="Expected return"
               value={formatPercent(portfolio.expectedReturnPct)}
@@ -402,33 +410,39 @@ export function Dashboard() {
               <span className="text-sm num strong">{risk.toleranceScore}/100</span>
             </div>
             <ProgressBar value={risk.toleranceScore / 100} tone="positive" label="Risk tolerance" />
-            <div className="row-between" style={{ marginTop: 6 }}>
+          </div>
+          <div className="stack-sm">
+            <div className="row-between">
               <span className="text-sm">Ability to absorb a loss</span>
               <span className="text-sm num strong">{risk.capacityScore}/100</span>
             </div>
             <ProgressBar value={risk.capacityScore / 100} tone="warning" label="Risk capacity" />
-            <div className="row-between" style={{ marginTop: 8 }}>
+          </div>
+          <div className="stack-sm">
+            <div className="row-between">
               <span className="text-sm strong">Plan uses</span>
               <Badge tone="accent">{risk.bucket}</Badge>
             </div>
-            <p className="text-xs text-muted" style={{ marginTop: 4 }}>
+            <p className="text-xs text-muted">
               The plan follows the lower of the two. A portfolio you abandon halfway through a
               drawdown is worse than a cautious one you keep.
             </p>
-            <div className="divider" />
+          </div>
+          <hr className="divider" />
+          <ul className="bullets text-xs text-subtle">
             {risk.drivers.map((d) => (
-              <div className="text-xs text-subtle" key={d}>
-                • {d}
-              </div>
+              <li key={d}>{d}</li>
             ))}
-            <Link to="/profile" className="btn btn-sm" style={{ marginTop: 8, alignSelf: 'flex-start' }}>
+          </ul>
+          <div>
+            <Link to="/profile" className="btn btn-sm">
               Retake the questionnaire
             </Link>
           </div>
         </Card>
 
         <Card title="Retirement outlook" subtitle="Sized from the spending you would need to replace">
-          <div className="grid grid-2" style={{ gap: 14 }}>
+          <div className="grid grid-4">
             <Stat
               label="Years to retirement"
               value={retirement.yearsToRetirement}
@@ -451,20 +465,18 @@ export function Dashboard() {
               tone={retirement.readinessRatio >= 0.9 ? 'positive' : 'warning'}
             />
           </div>
-          <div style={{ marginTop: 14 }}>
+          <div className="stack-sm">
             <ProgressBar value={retirement.readinessRatio} label="Retirement readiness" />
-            <div className="text-xs text-subtle" style={{ marginTop: 6 }}>
+            <div className="text-xs text-subtle">
               {formatPercent(retirement.readinessRatio, 0)} of the required corpus on current behaviour
             </div>
           </div>
-          <div style={{ marginTop: 14 }}>
-            <AssumptionList assumptions={retirement.assumptions} title="How this was calculated" />
-          </div>
+          <AssumptionList assumptions={retirement.assumptions} title="How this was calculated" />
         </Card>
       </div>
 
       <Card title="Platform assumptions" subtitle="Every projection on this page rests on these, and you can change them">
-        <div className="grid grid-4" style={{ gap: 14 }}>
+        <div className="grid grid-4">
           <Stat label="Inflation" value={formatPercent(snapshot.assumptions.inflationPct)} meta="per year" />
           <Stat label="Risk-free rate" value={formatPercent(snapshot.assumptions.riskFreePct)} meta="for Sharpe ratio" />
           <Stat
@@ -478,7 +490,7 @@ export function Dashboard() {
             meta="sustainable in retirement"
           />
         </div>
-        <div className="row-wrap" style={{ marginTop: 14 }}>
+        <div className="row-wrap">
           <Link to="/assumptions" className="btn btn-sm">
             Review and edit assumptions
           </Link>

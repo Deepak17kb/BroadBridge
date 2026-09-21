@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react';
+import { useCallback, useMemo, useState } from 'react';
 import {
   allocationForGoal,
   formatCompact,
@@ -16,18 +16,19 @@ import {
 } from '@wealth/shared';
 import { useLoadedProfile, useProfile } from '../state/ProfileContext';
 import {
+  AnimatedNumber,
   AssumptionList,
-  Badge,
   Callout,
   Card,
-  Empty,
+  EmptyState,
+  Icon,
   MoneyInput,
   NumberInput,
-  ProgressBar,
   Slider,
   Stat,
 } from '../components/ui';
 import { GoalFundingChart, MonteCarloFan, TableToggle } from '../components/charts/Charts';
+import { GoalList } from '../components/GoalList';
 import { SurplusSplit } from '../components/SurplusSplit';
 
 /**
@@ -117,6 +118,14 @@ export function Goals() {
 
   const onTrack = snapshot.goalProjections.filter((g) => g.onTrack).length;
   const monthlyCommitted = profile.goals.reduce((acc, g) => acc + g.monthlyContribution, 0);
+  const money = (v: number) => formatCompact(v, currency);
+
+  /** Opening another goal starts its test sliders from zero. */
+  const selectGoal = useCallback((goalId: string) => {
+    setSelectedId(goalId);
+    setTestExtra(0);
+    setTestLump(0);
+  }, []);
 
   function addGoal() {
     const id = `g-${Date.now()}`;
@@ -157,7 +166,7 @@ export function Goals() {
             </p>
           </div>
           <button className="btn btn-primary" onClick={addGoal}>
-            + Add goal
+            <Icon name="plus" /> Add goal
           </button>
         </div>
       </header>
@@ -174,7 +183,7 @@ export function Goals() {
 
       {profile.goals.length === 0 ? (
         <Card>
-          <Empty
+          <EmptyState
             title="No goals yet"
             message="Add what you are actually saving for. Named goals get funded far more reliably than a general investment pot."
             action={
@@ -234,45 +243,20 @@ export function Goals() {
             {/* Goal list. `self-start` keeps it as tall as its goals; the grid
                 would otherwise stretch it to the detail column beside it. */}
             <Card title="Your goals" subtitle="Select one to model it" className="self-start">
-              <div className="stack-sm">
-                {snapshot.goalProjections.map((p) => {
-                  const goal = profile.goals.find((g) => g.id === p.goalId);
-                  const active = selectedId === p.goalId;
-                  return (
-                    <button
-                      key={p.goalId}
-                      className={`persona ${active ? 'selected' : ''}`}
-                      style={{ padding: 12 }}
-                      onClick={() => {
-                        setSelectedId(p.goalId);
-                        setTestExtra(0);
-                        setTestLump(0);
-                      }}
-                    >
-                      <div className="row-between">
-                        <span className="text-sm strong">{p.goalName}</span>
-                        <Badge tone={p.onTrack ? 'positive' : 'negative'}>
-                          {formatPercent(p.fundedRatio, 0)}
-                        </Badge>
-                      </div>
-                      <div style={{ margin: '7px 0' }}>
-                        <ProgressBar value={p.fundedRatio} label={`${p.goalName} funding`} />
-                      </div>
-                      <div className="text-xs text-subtle">
-                        {formatCompact(p.inflatedTarget, currency)} needed in {p.yearsToGoal.toFixed(1)}y ·{' '}
-                        {formatCompact(goal?.monthlyContribution ?? 0, currency)}/mo
-                        {goal?.priority === 'must_have' && ' · must have'}
-                      </div>
-                    </button>
-                  );
-                })}
-              </div>
+              <GoalList
+                projections={snapshot.goalProjections}
+                goals={profile.goals}
+                selectedId={selectedId}
+                currency={currency}
+                onSelect={selectGoal}
+              />
             </Card>
 
             {/* Detail and live model. */}
             {selected && projection ? (
               <div className="stack">
                 <Card
+                  variant="primary"
                   title={selected.name}
                   subtitle={`${projection.yearsToGoal.toFixed(1)} years away · projected at ${formatPercent(projection.assumedReturnPct)} a year`}
                   actions={
@@ -289,26 +273,27 @@ export function Goals() {
                     </button>
                   }
                 >
-                  <div className="grid grid-4" style={{ gap: 14 }}>
+                  <div className="grid grid-4">
                     <Stat
                       label="Needed at goal date"
-                      value={formatCompact(projection.inflatedTarget, currency)}
+                      value={<AnimatedNumber value={projection.inflatedTarget} format={money} />}
                       meta={`${formatCompact(selected.targetAmountToday, currency)} in today's money`}
                     />
                     <Stat
                       label="Projected"
-                      value={formatCompact(projection.projectedCorpus, currency)}
+                      value={<AnimatedNumber value={projection.projectedCorpus} format={money} />}
                       tone={projection.onTrack ? 'positive' : 'negative'}
                       meta={formatPercent(projection.fundedRatio, 0) + ' funded'}
                     />
                     <Stat
                       label={projection.surplus >= 0 ? 'Surplus' : 'Shortfall'}
-                      value={formatCompact(Math.abs(projection.surplus), currency)}
+                      value={<AnimatedNumber value={Math.abs(projection.surplus)} format={money} />}
                       tone={projection.surplus >= 0 ? 'positive' : 'negative'}
+                      meta={projection.surplus >= 0 ? "You're on track" : 'Still to find by the goal date'}
                     />
                     <Stat
                       label="Needs per month"
-                      value={formatCompact(projection.requiredMonthly, currency)}
+                      value={<AnimatedNumber value={projection.requiredMonthly} format={money} />}
                       meta={
                         projection.monthlyGap > 0
                           ? `${formatCompact(projection.monthlyGap, currency)} more than now`
@@ -319,24 +304,22 @@ export function Goals() {
                   </div>
 
                   {!projection.onTrack && (
-                    <div style={{ marginTop: 14 }}>
-                      <Callout tone="warning">
-                        {projection.requiredReturnPct === null ? (
-                          <>
-                            No realistic return closes this gap — it needs a bigger contribution, more
-                            time, or a smaller target.
-                          </>
-                        ) : (
-                          <>
-                            The alternative to saving more is earning{' '}
-                            <strong>{formatPercent(projection.requiredReturnPct)}</strong> a year
-                            instead of the <strong>{formatPercent(projection.assumedReturnPct)}</strong>{' '}
-                            assumed. A return is not something you can choose, so treat that as a
-                            measure of how large the gap is rather than a plan.
-                          </>
-                        )}
-                      </Callout>
-                    </div>
+                    <Callout tone="warning">
+                      {projection.requiredReturnPct === null ? (
+                        <>
+                          No realistic return closes this gap — it needs a bigger contribution, more
+                          time, or a smaller target.
+                        </>
+                      ) : (
+                        <>
+                          The alternative to saving more is earning{' '}
+                          <strong>{formatPercent(projection.requiredReturnPct)}</strong> a year
+                          instead of the <strong>{formatPercent(projection.assumedReturnPct)}</strong>{' '}
+                          assumed. A return is not something you can choose, so treat that as a
+                          measure of how large the gap is rather than a plan.
+                        </>
+                      )}
+                    </Callout>
                   )}
                 </Card>
 
@@ -424,7 +407,7 @@ export function Goals() {
                 )}
 
                 <Card title="Edit this goal" subtitle="Changes here save automatically">
-                  <div className="grid grid-2">
+                  <div className="form-grid">
                     <div className="field">
                       <label htmlFor="goal-name">Name</label>
                       <input
@@ -564,7 +547,7 @@ export function Goals() {
               </div>
             ) : (
               <Card>
-                <Empty title="Select a goal" message="Choose a goal on the left to model it in detail." />
+                <EmptyState title="Select a goal" message="Choose a goal on the left to model it in detail." />
               </Card>
             )}
           </div>

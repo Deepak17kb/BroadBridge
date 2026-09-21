@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   formatCompact,
   formatPercent,
+  type AgentAttachment,
   type AgentEvent,
   type AgentMessage,
   type AgentPlanStep,
@@ -10,7 +11,7 @@ import {
 } from '@wealth/shared';
 import { api, streamAgent, type AgentCapabilities } from '../lib/api';
 import { useLoadedProfile, useProfile } from '../state/ProfileContext';
-import { AssumptionList, Badge, Callout, Card } from '../components/ui';
+import { AssumptionList, Badge, Callout, Card, Icon } from '../components/ui';
 import { MonteCarloFan, TableToggle } from '../components/charts/Charts';
 
 /**
@@ -275,7 +276,6 @@ export function Assistant() {
     });
   }
 
-  const grounded = verification.filter((v) => v.status === 'grounded').length;
   const lastAssistant = [...messages].reverse().find((m) => m.role === 'assistant');
   const activeVerification = verification.length ? verification : (lastAssistant?.verification ?? []);
   const activePlan = plan.length ? plan : (lastAssistant?.plan ?? []);
@@ -303,7 +303,7 @@ export function Assistant() {
             </p>
           </div>
           {capabilities && (
-            <div style={{ textAlign: 'right' }}>
+            <div className="page-head-aside">
               <Badge
                 tone={
                   capabilities.engine === 'deterministic'
@@ -315,7 +315,7 @@ export function Assistant() {
               >
                 {ENGINE_TEXT[capabilities.engine]}
               </Badge>
-              <div className="text-xs text-subtle" style={{ marginTop: 4 }}>
+              <div className="text-xs text-subtle">
                 {capabilities.tools.length} tools · {capabilities.knowledgeBase.length} reference notes
               </div>
             </div>
@@ -336,21 +336,19 @@ export function Assistant() {
       {/* Conversation history. Collapsed by default so it never competes with
           the answer, but one click from any past question. */}
       <Card>
-        <div className="row-between">
+        <div className="row-between wrap">
           <button
             className="btn btn-ghost"
             onClick={() => setHistoryOpen((open) => !open)}
             aria-expanded={historyOpen}
+            aria-controls={historyOpen ? 'conversation-history' : undefined}
             disabled={sessions.length === 0}
           >
-            {historyOpen ? '▾' : '▸'} Past conversations
-            {sessions.length > 0 && (
-              <span className="text-muted" style={{ marginLeft: 6 }}>
-                ({sessions.length})
-              </span>
-            )}
+            <Icon name={historyOpen ? 'chevronDown' : 'chevronRight'} />
+            Past conversations
+            {sessions.length > 0 && <span className="text-muted">({sessions.length})</span>}
           </button>
-          <div className="row" style={{ gap: 8 }}>
+          <div className="row gap-2">
             {sessionId && (
               <span className="text-xs text-subtle">
                 {messages.length} message{messages.length === 1 ? '' : 's'} in this conversation
@@ -361,75 +359,79 @@ export function Assistant() {
               onClick={newChat}
               disabled={streaming || (messages.length === 0 && !sessionId)}
             >
-              New chat
+              <Icon name="plus" /> New chat
             </button>
           </div>
         </div>
 
         {sessions.length === 0 && (
-          <p className="text-xs text-subtle" style={{ marginTop: 8 }}>
+          <p className="text-xs text-subtle">
             Conversations are saved as you have them, and reopen here with their full reasoning
             trace.
           </p>
         )}
 
         {historyOpen && sessions.length > 0 && (
-          <div className="stack-sm" style={{ marginTop: 12 }}>
-            {sessions.map((s) => (
-              <div
-                key={s.id}
-                className="row-between session-row"
-                style={{
-                  gap: 10,
-                  padding: '8px 10px',
-                  borderRadius: 8,
-                  background: s.id === sessionId ? 'var(--surface-hover)' : undefined,
-                }}
-              >
-                <button
-                  className="btn btn-ghost"
-                  style={{ flex: 1, justifyContent: 'flex-start', textAlign: 'left', minWidth: 0 }}
-                  onClick={() => openSession(s.id)}
-                  disabled={streaming || loadingSession !== null}
-                  title={s.preview}
-                >
-                  <span className="truncate">{s.preview || 'Untitled conversation'}</span>
-                </button>
-                <span className="text-xs text-subtle" style={{ whiteSpace: 'nowrap' }}>
-                  {s.messageCount} msg · {new Date(s.updatedAt).toLocaleDateString()}
-                </span>
-                {loadingSession === s.id && <span className="spinner" />}
-                {confirmDelete === s.id ? (
-                  <span className="row" style={{ gap: 6 }}>
-                    <button className="btn btn-danger" onClick={() => removeSession(s.id)}>
-                      Delete
-                    </button>
-                    <button className="btn btn-ghost" onClick={() => setConfirmDelete(null)}>
-                      Cancel
-                    </button>
-                  </span>
-                ) : (
+          <ul className="list-plain stack-sm" id="conversation-history">
+            {sessions.map((s) => {
+              const current = s.id === sessionId;
+              return (
+                <li key={s.id} className={`row-between wrap session-row ${current ? 'is-current' : ''}`.trim()}>
                   <button
-                    className="btn btn-ghost"
-                    onClick={() => setConfirmDelete(s.id)}
-                    aria-label={`Delete conversation: ${s.preview || 'untitled'}`}
-                    disabled={streaming}
+                    className="btn btn-ghost session-open"
+                    onClick={() => openSession(s.id)}
+                    disabled={streaming || loadingSession !== null}
+                    title={s.preview}
+                    aria-current={current ? 'true' : undefined}
                   >
-                    ✕
+                    <span className="truncate">{s.preview || 'Untitled conversation'}</span>
                   </button>
-                )}
-              </div>
-            ))}
-          </div>
+                  <span className="text-xs text-subtle nowrap">
+                    {s.messageCount} msg · {new Date(s.updatedAt).toLocaleDateString()}
+                  </span>
+                  {loadingSession === s.id && (
+                    <span className="spinner" role="status" aria-label="Opening conversation" />
+                  )}
+                  {confirmDelete === s.id ? (
+                    <span className="row gap-2">
+                      <button className="btn btn-danger" onClick={() => removeSession(s.id)}>
+                        Delete
+                      </button>
+                      <button className="btn btn-ghost" onClick={() => setConfirmDelete(null)}>
+                        Cancel
+                      </button>
+                    </span>
+                  ) : (
+                    <button
+                      className="btn btn-ghost btn-icon"
+                      onClick={() => setConfirmDelete(s.id)}
+                      aria-label={`Delete conversation: ${s.preview || 'untitled'}`}
+                      disabled={streaming}
+                    >
+                      <Icon name="close" />
+                    </button>
+                  )}
+                </li>
+              );
+            })}
+          </ul>
         )}
       </Card>
 
       <div className="chat">
         <div className="chat-panel">
-          <div className="chat-log" ref={logRef}>
+          {/* A log: screen readers announce each new turn, not every streamed token. */}
+          <div
+            className="chat-log"
+            ref={logRef}
+            role="log"
+            aria-live="polite"
+            aria-relevant="additions"
+            aria-label="Conversation"
+          >
             {messages.length === 0 && !streaming && (
-              <div className="stack-sm" style={{ padding: '18px 4px' }}>
-                <div className="strong">What would you like to know?</div>
+              <div className="chat-empty stack-sm">
+                <h2 className="card-title">What would you like to know?</h2>
                 <p className="text-sm text-muted">
                   I can read your position, project any goal, run what-if scenarios against thousands
                   of simulated markets, compare options, and explain the reasoning behind any
@@ -458,8 +460,8 @@ export function Assistant() {
                   {streamedText ? (
                     <div className="msg-bubble typing-caret">{streamedText}</div>
                   ) : (
-                    <div className="msg-bubble text-muted row" style={{ gap: 9 }}>
-                      <span className="spinner" />
+                    <div className="msg-bubble text-muted row gap-2">
+                      <span className="spinner" aria-hidden="true" />
                       {toolCalls.at(-1)?.label ?? 'Working out how to answer…'}
                     </div>
                   )}
@@ -512,166 +514,231 @@ export function Assistant() {
                 </button>
               )}
             </form>
-            <div className="text-xs text-subtle" style={{ marginTop: 7 }}>
+            <p className="text-xs text-subtle mt-2">
               Synthetic data, illustrative projections, not financial advice.
-            </div>
+            </p>
           </div>
         </div>
 
-        {/* Reasoning trace. */}
-        <div className="trace">
-          <div className="trace-head">
-            <span className="card-title">Reasoning trace</span>
-            {streaming && <span className="spinner" />}
-            <span className="topbar-spacer" />
-            {activeVerification.length > 0 && (
-              <Badge tone={grounded === activeVerification.length ? 'positive' : 'warning'}>
-                {activeVerification.filter((v) => v.status === 'grounded').length}/
-                {activeVerification.length} grounded
-              </Badge>
-            )}
-          </div>
-          <div className="trace-body">
-            {activePlan.length === 0 && toolCalls.length === 0 && (
-              <p className="text-sm text-subtle">
-                Ask a question and the plan, every tool call and the grounding check will appear here
-                as they happen.
-              </p>
-            )}
+        <ReasoningTrace
+          streaming={streaming}
+          rationale={rationale}
+          plan={activePlan}
+          toolCalls={toolCalls}
+          retrievals={retrievals}
+          thoughts={thoughts}
+          verification={activeVerification}
+          capabilities={capabilities}
+        />
+      </div>
+    </div>
+  );
+}
 
-            {rationale && (
-              <p className="text-xs text-muted" style={{ marginBottom: 13 }}>
-                {rationale}
-              </p>
-            )}
+/** How a plan step or tool call stands, for screen readers; the icon shows it. */
+const STATUS_TEXT: Record<AgentPlanStep['status'], string> = {
+  pending: 'Waiting',
+  running: 'Running',
+  done: 'Done',
+  skipped: 'Skipped',
+  failed: 'Failed',
+};
 
-            {activePlan.length > 0 && (
-              <>
-                <div className="stat-label" style={{ marginBottom: 9 }}>
-                  Plan
-                </div>
-                {activePlan.map((step) => (
-                  <div className="trace-step" key={step.id}>
-                    <span className={`trace-icon ${step.status === 'done' ? 'done' : step.status === 'running' ? 'running' : step.status === 'failed' ? 'failed' : ''}`}>
-                      {step.status === 'done' ? '✓' : step.status === 'failed' ? '!' : step.status === 'running' ? '•' : ''}
-                    </span>
-                    <div>
-                      <div className="trace-title">{step.goal}</div>
-                      <div className="trace-detail num">{step.tool}</div>
+function TraceIcon({ status }: { status: AgentPlanStep['status'] }) {
+  return (
+    <span className={`trace-icon ${status}`} aria-hidden="true">
+      {status === 'done' && <Icon name="check" size={12} />}
+      {status === 'failed' && <Icon name="exclamation" size={12} />}
+      {status === 'running' && <span className="trace-dot" />}
+    </span>
+  );
+}
+
+/**
+ * The agent's reasoning, shown as it happens: the plan, each tool call with its
+ * timing, what was retrieved, and the check of every figure against the tool
+ * output that produced it.
+ */
+function ReasoningTrace({
+  streaming,
+  rationale,
+  plan,
+  toolCalls,
+  retrievals,
+  thoughts,
+  verification,
+  capabilities,
+}: {
+  streaming: boolean;
+  rationale: string;
+  plan: AgentPlanStep[];
+  toolCalls: TraceToolCall[];
+  retrievals: { title: string; score: number; snippet: string }[];
+  thoughts: string[];
+  verification: VerificationCheck[];
+  capabilities: AgentCapabilities | null;
+}) {
+  // Counted from the checks on show, so the badge's colour agrees with its count.
+  const grounded = verification.filter((v) => v.status === 'grounded').length;
+
+  return (
+    <aside className="trace" aria-label="Reasoning trace">
+      <div className="trace-head">
+        <h2 className="card-title">Reasoning trace</h2>
+        {streaming && <span className="spinner" aria-hidden="true" />}
+        <span className="flex-1" />
+        {verification.length > 0 && (
+          <Badge tone={grounded === verification.length ? 'positive' : 'warning'}>
+            {grounded}/{verification.length} grounded
+          </Badge>
+        )}
+      </div>
+      <div className="trace-body">
+        {plan.length === 0 && toolCalls.length === 0 && (
+          <p className="text-sm text-subtle">
+            Ask a question and the plan, every tool call and the grounding check will appear here as
+            they happen.
+          </p>
+        )}
+
+        {rationale && <p className="text-xs text-muted">{rationale}</p>}
+
+        {plan.length > 0 && (
+          <section>
+            <h3 className="stat-label mb-2">Plan</h3>
+            <ol className="list-plain">
+              {plan.map((step) => (
+                <li className="trace-step" key={step.id}>
+                  <TraceIcon status={step.status} />
+                  <div className="min-w-0">
+                    <div className="trace-title">
+                      <span className="sr-only">{STATUS_TEXT[step.status]}: </span>
+                      {step.goal}
                     </div>
+                    <div className="trace-detail num">{step.tool}</div>
                   </div>
-                ))}
-              </>
-            )}
+                </li>
+              ))}
+            </ol>
+          </section>
+        )}
 
-            {toolCalls.length > 0 && (
-              <>
-                <div className="divider" style={{ margin: '11px 0' }} />
-                <div className="stat-label" style={{ marginBottom: 9 }}>
-                  Tool calls
-                </div>
+        {toolCalls.length > 0 && (
+          <>
+            <hr className="divider" />
+            <section>
+              <h3 className="stat-label mb-2">Tool calls</h3>
+              <ol className="list-plain">
                 {toolCalls.map((call) => (
-                  <div className="trace-step" key={call.id}>
-                    <span className={`trace-icon ${call.status === 'done' ? 'done' : 'running'}`}>
-                      {call.status === 'done' ? '✓' : '•'}
-                    </span>
-                    <div style={{ minWidth: 0 }}>
+                  <li className="trace-step" key={call.id}>
+                    <TraceIcon status={call.status} />
+                    <div className="min-w-0">
                       <div className="row-between">
-                        <span className="trace-title">{call.label}</span>
+                        <span className="trace-title">
+                          <span className="sr-only">{STATUS_TEXT[call.status]}: </span>
+                          {call.label}
+                        </span>
                         {call.ms !== undefined && <span className="trace-timing">{call.ms}ms</span>}
                       </div>
                       <div className="trace-detail num">{call.tool}</div>
                       {call.summary && (
-                        <details className="disclosure" style={{ marginTop: 6 }}>
+                        <details className="disclosure mt-2">
                           <summary>What it returned</summary>
-                          <div className="disclosure-body text-xs" style={{ whiteSpace: 'pre-wrap' }}>
-                            {call.summary}
-                          </div>
+                          <div className="disclosure-body text-xs pre-wrap">{call.summary}</div>
                         </details>
                       )}
                     </div>
-                  </div>
+                  </li>
                 ))}
-              </>
-            )}
+              </ol>
+            </section>
+          </>
+        )}
 
-            {retrievals.length > 0 && (
-              <>
-                <div className="divider" style={{ margin: '11px 0' }} />
-                <div className="stat-label" style={{ marginBottom: 9 }}>
-                  Knowledge retrieved
-                </div>
+        {retrievals.length > 0 && (
+          <>
+            <hr className="divider" />
+            <section>
+              <h3 className="stat-label mb-2">Knowledge retrieved</h3>
+              <ul className="list-plain stack-sm">
                 {retrievals.map((hit) => (
-                  <div key={hit.title} style={{ marginBottom: 10 }}>
+                  <li key={hit.title}>
                     <div className="row-between">
                       <span className="text-sm strong">{hit.title}</span>
                       <span className="trace-timing">{hit.score.toFixed(2)}</span>
                     </div>
                     <div className="trace-detail">{hit.snippet}</div>
-                  </div>
+                  </li>
                 ))}
-              </>
-            )}
+              </ul>
+            </section>
+          </>
+        )}
 
-            {thoughts.length > 0 && (
-              <>
-                <div className="divider" style={{ margin: '11px 0' }} />
-                {thoughts.map((t, i) => (
-                  <p className="text-xs text-muted" key={i}>
-                    {t}
-                  </p>
-                ))}
-              </>
-            )}
+        {thoughts.length > 0 && (
+          <>
+            <hr className="divider" />
+            {thoughts.map((t, i) => (
+              <p className="text-xs text-muted" key={i}>
+                {t}
+              </p>
+            ))}
+          </>
+        )}
 
-            {activeVerification.length > 0 && (
-              <>
-                <div className="divider" style={{ margin: '11px 0' }} />
-                <div className="stat-label" style={{ marginBottom: 6 }}>
-                  Grounding check
-                </div>
-                <p className="text-xs text-subtle" style={{ marginBottom: 9 }}>
-                  Every figure in the answer is matched back against the tool output that produced
-                  it. An unmatched figure is flagged rather than trusted.
-                </p>
-                {activeVerification.map((check, i) => (
-                  <div className="row" key={i} style={{ gap: 7, marginBottom: 6, alignItems: 'flex-start' }}>
-                    <span
-                      className={`dot ${check.status === 'grounded' ? '' : 'pulse'}`}
-                      style={{
-                        background: check.status === 'grounded' ? 'var(--positive)' : 'var(--warning)',
-                        marginTop: 6,
-                      }}
-                    />
-                    <div style={{ minWidth: 0 }}>
-                      <span className="text-sm num">{check.claim}</span>
-                      <div className="trace-detail">{check.evidence}</div>
-                    </div>
-                  </div>
-                ))}
-              </>
-            )}
-
-            {capabilities && (
-              <>
-                <div className="divider" style={{ margin: '11px 0' }} />
-                <details className="disclosure">
-                  <summary>Tools available to the agent ({capabilities.tools.length})</summary>
-                  <div className="disclosure-body stack-sm">
-                    {capabilities.tools.map((t) => (
-                      <div key={t.name}>
-                        <div className="text-sm strong">{t.label}</div>
-                        <div className="text-xs text-subtle num">{t.name}</div>
+        {verification.length > 0 && (
+          <>
+            <hr className="divider" />
+            <section>
+              <h3 className="stat-label mb-2">Grounding check</h3>
+              <p className="text-xs text-subtle">
+                Every figure in the answer is matched back against the tool output that produced it.
+                An unmatched figure is flagged rather than trusted.
+              </p>
+              <ul className="list-plain stack-sm">
+                {verification.map((check, i) => {
+                  const ok = check.status === 'grounded';
+                  return (
+                    <li className="grounding-row" key={`${check.claim}-${i}`}>
+                      <span
+                        className={`dot grounding-dot ${ok ? 'grounded' : 'unmatched pulse'}`}
+                        aria-hidden="true"
+                      />
+                      <div className="min-w-0">
+                        <span className="text-sm num">
+                          <span className="sr-only">{ok ? 'Grounded: ' : 'Not matched: '}</span>
+                          {check.claim}
+                        </span>
+                        <div className="trace-detail">{check.evidence}</div>
                       </div>
-                    ))}
-                  </div>
-                </details>
-              </>
-            )}
-          </div>
-        </div>
+                    </li>
+                  );
+                })}
+              </ul>
+            </section>
+          </>
+        )}
+
+        {capabilities && (
+          <>
+            <hr className="divider" />
+            <details className="disclosure">
+              <summary>Tools available to the agent ({capabilities.tools.length})</summary>
+              <div className="disclosure-body">
+                <ul className="list-plain stack-sm">
+                  {capabilities.tools.map((t) => (
+                    <li key={t.name}>
+                      <div className="text-sm strong">{t.label}</div>
+                      <div className="text-xs text-subtle num">{t.name}</div>
+                    </li>
+                  ))}
+                </ul>
+              </div>
+            </details>
+          </>
+        )}
       </div>
-    </div>
+    </aside>
   );
 }
 
@@ -719,114 +786,144 @@ function MessageBubble({ message, currency }: { message: AgentMessage; currency:
         </div>
 
         {message.attachments?.map((attachment, i) => (
-          <div key={i} style={{ marginTop: 11 }}>
-            {attachment.kind === 'monte_carlo' && (
-              <Card title="Simulated outcomes" subtitle={`${formatPercent(attachment.data.successProbability, 0)} of paths reach the target`}>
-                <MonteCarloFan result={attachment.data} currency={currency} height={190} />
-              </Card>
-            )}
-            {attachment.kind === 'goal_projection' && (
-              <Card title={attachment.data.goalName} subtitle={`${attachment.data.yearsToGoal.toFixed(1)} years away`}>
-                <div className="grid grid-2" style={{ gap: 12 }}>
-                  <div>
-                    <div className="stat-label">Needed then</div>
-                    <div className="text-sm num strong">
-                      {formatCompact(attachment.data.inflatedTarget, currency)}
-                    </div>
-                  </div>
-                  <div>
-                    <div className="stat-label">Projected</div>
-                    <div className={`text-sm num strong ${attachment.data.onTrack ? 'text-positive' : 'text-negative'}`}>
-                      {formatCompact(attachment.data.projectedCorpus, currency)}
-                    </div>
-                  </div>
-                </div>
-                <AssumptionList assumptions={attachment.data.assumptions} />
-              </Card>
-            )}
-            {attachment.kind === 'scenario' && (
-              <Card title={attachment.data.label} subtitle="Scenario result">
-                <div className="grid grid-3" style={{ gap: 12 }}>
-                  <div>
-                    <div className="stat-label">Corpus</div>
-                    <div className="text-sm num strong">
-                      {formatCompact(attachment.data.snapshot.netWorthAtRetirement, currency)}
-                    </div>
-                  </div>
-                  <div>
-                    <div className="stat-label">vs today</div>
-                    <div
-                      className={`text-sm num strong ${attachment.data.deltaVsBaseline.netWorthAtRetirement >= 0 ? 'text-positive' : 'text-negative'}`}
-                    >
-                      {attachment.data.deltaVsBaseline.netWorthAtRetirement >= 0 ? '+' : '-'}
-                      {formatCompact(Math.abs(attachment.data.deltaVsBaseline.netWorthAtRetirement), currency)}
-                    </div>
-                  </div>
-                  <div>
-                    <div className="stat-label">Success</div>
-                    <div className="text-sm num strong">
-                      {formatPercent(attachment.data.monteCarlo.successProbability, 0)}
-                    </div>
-                  </div>
-                </div>
-                <MonteCarloFan result={attachment.data.monteCarlo} currency={currency} height={180} />
-              </Card>
-            )}
-            {attachment.kind === 'actions' && attachment.data.length > 0 && (
-              <Card title="Recommended actions">
-                <div className="stack-sm">
-                  {attachment.data.slice(0, 4).map((a, idx) => (
-                    <div key={a.id} className="row" style={{ gap: 10, alignItems: 'flex-start' }}>
-                      <span className="action-rank">{idx + 1}</span>
-                      <div style={{ minWidth: 0 }}>
-                        <div className="text-sm strong">{a.title}</div>
-                        <div className="text-xs text-muted">
-                          {a.impact.metric}:{' '}
-                          {a.impact.unit === 'currency'
-                            ? formatCompact(a.impact.value, currency)
-                            : `${a.impact.value}${a.impact.unit === 'percent' ? '%' : ` ${a.impact.unit}`}`}
-                        </div>
-                      </div>
-                    </div>
-                  ))}
-                </div>
-              </Card>
-            )}
-            {attachment.kind === 'debt_plan' && (
-              <Card title="Debt payoff plan" subtitle={`${attachment.data.strategy} · debt-free in ${attachment.data.monthsToDebtFree} months`}>
-                <TableToggle label="Payoff order">
-                  <table className="data">
-                    <thead>
-                      <tr>
-                        <th>Debt</th>
-                        <th className="right">Cleared in</th>
-                        <th className="right">Interest paid</th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {attachment.data.order.map((o) => (
-                        <tr key={o.liabilityId}>
-                          <td>{o.name}</td>
-                          <td className="right num">month {o.payoffMonth}</td>
-                          <td className="right num">{formatCompact(o.interestPaid, currency)}</td>
-                        </tr>
-                      ))}
-                    </tbody>
-                  </table>
-                </TableToggle>
-              </Card>
-            )}
-          </div>
+          <AttachmentCard key={i} attachment={attachment} currency={currency} />
         ))}
 
         {message.assumptions && message.assumptions.length > 0 && (
-          <div style={{ marginTop: 10 }}>
+          <div className="mt-3">
             <AssumptionList assumptions={message.assumptions} title="Assumptions behind this answer" />
           </div>
         )}
       </div>
     </div>
   );
+}
+
+/**
+ * A card the agent attached to an answer, drawn from the tool output the answer
+ * was grounded on. Kinds without a card here render nothing.
+ */
+function AttachmentCard({ attachment, currency }: { attachment: AgentAttachment; currency: Currency }) {
+  switch (attachment.kind) {
+    case 'monte_carlo':
+      return (
+        <Card
+          className="msg-attachment"
+          title="Simulated outcomes"
+          subtitle={`${formatPercent(attachment.data.successProbability, 0)} of paths reach the target`}
+        >
+          <MonteCarloFan result={attachment.data} currency={currency} height={190} />
+        </Card>
+      );
+    case 'goal_projection':
+      return (
+        <Card
+          className="msg-attachment"
+          title={attachment.data.goalName}
+          subtitle={`${attachment.data.yearsToGoal.toFixed(1)} years away`}
+        >
+          <div className="grid grid-pair gap-3">
+            <div>
+              <div className="stat-label">Needed then</div>
+              <div className="text-sm num strong">
+                {formatCompact(attachment.data.inflatedTarget, currency)}
+              </div>
+            </div>
+            <div>
+              <div className="stat-label">Projected</div>
+              <div className={`text-sm num strong ${attachment.data.onTrack ? 'text-positive' : 'text-negative'}`}>
+                {formatCompact(attachment.data.projectedCorpus, currency)}
+              </div>
+            </div>
+          </div>
+          <AssumptionList assumptions={attachment.data.assumptions} />
+        </Card>
+      );
+    case 'scenario':
+      return (
+        <Card className="msg-attachment" title={attachment.data.label} subtitle="Scenario result">
+          <div className="grid grid-3 gap-3">
+            <div>
+              <div className="stat-label">Corpus</div>
+              <div className="text-sm num strong">
+                {formatCompact(attachment.data.snapshot.netWorthAtRetirement, currency)}
+              </div>
+            </div>
+            <div>
+              <div className="stat-label">vs today</div>
+              <div
+                className={`text-sm num strong ${attachment.data.deltaVsBaseline.netWorthAtRetirement >= 0 ? 'text-positive' : 'text-negative'}`}
+              >
+                {attachment.data.deltaVsBaseline.netWorthAtRetirement >= 0 ? '+' : '-'}
+                {formatCompact(Math.abs(attachment.data.deltaVsBaseline.netWorthAtRetirement), currency)}
+              </div>
+            </div>
+            <div>
+              <div className="stat-label">Success</div>
+              <div className="text-sm num strong">
+                {formatPercent(attachment.data.monteCarlo.successProbability, 0)}
+              </div>
+            </div>
+          </div>
+          <MonteCarloFan result={attachment.data.monteCarlo} currency={currency} height={180} />
+        </Card>
+      );
+    case 'actions':
+      if (attachment.data.length === 0) return null;
+      return (
+        <Card className="msg-attachment" title="Recommended actions">
+          <ol className="list-plain stack-sm">
+            {attachment.data.slice(0, 4).map((a, idx) => (
+              <li key={a.id} className="row gap-3 items-start">
+                <span className="action-rank" aria-hidden="true">
+                  {idx + 1}
+                </span>
+                <div className="min-w-0">
+                  <div className="text-sm strong">{a.title}</div>
+                  <div className="text-xs text-muted">
+                    {a.impact.metric}:{' '}
+                    {a.impact.unit === 'currency'
+                      ? formatCompact(a.impact.value, currency)
+                      : `${a.impact.value}${a.impact.unit === 'percent' ? '%' : ` ${a.impact.unit}`}`}
+                  </div>
+                </div>
+              </li>
+            ))}
+          </ol>
+        </Card>
+      );
+    case 'debt_plan':
+      return (
+        <Card
+          className="msg-attachment"
+          title="Debt payoff plan"
+          subtitle={`${attachment.data.strategy} · debt-free in ${attachment.data.monthsToDebtFree} months`}
+        >
+          <TableToggle label="Payoff order">
+            <table className="data">
+              <thead>
+                <tr>
+                  <th>Debt</th>
+                  <th className="right">Cleared in</th>
+                  <th className="right">Interest paid</th>
+                </tr>
+              </thead>
+              <tbody>
+                {attachment.data.order.map((o) => (
+                  <tr key={o.liabilityId}>
+                    <td>{o.name}</td>
+                    <td className="right num">month {o.payoffMonth}</td>
+                    <td className="right num">{formatCompact(o.interestPaid, currency)}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </TableToggle>
+        </Card>
+      );
+    default:
+      return null;
+  }
 }
 
 /**

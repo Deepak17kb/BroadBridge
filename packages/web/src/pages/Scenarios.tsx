@@ -10,7 +10,7 @@ import {
 } from '@wealth/shared';
 import { api } from '../lib/api';
 import { useLoadedProfile } from '../state/ProfileContext';
-import { AssumptionList, Badge, Callout, Card, Slider, Stat } from '../components/ui';
+import { AnimatedNumber, AssumptionList, Badge, Callout, Card, Slider, Stat } from '../components/ui';
 import { RiskLadder, useRiskLadder, type LadderRow } from '../components/RiskLadder';
 import { MonteCarloFan, OutcomeHistogram, ScenarioComparison, TableToggle } from '../components/charts/Charts';
 
@@ -175,6 +175,8 @@ export function Scenarios() {
 
   const hasLevers = Object.values(settled).some((v) => v !== undefined);
   const income = snapshot.cashflow.monthlyIncome || 100000;
+  const money = (v: number) => formatCompact(v, currency);
+  const wholePercent = (v: number) => formatPercent(v, 0);
 
   return (
     <div className="stack">
@@ -264,8 +266,8 @@ export function Scenarios() {
               hint="A bonus, maturity or sale proceeds"
             />
 
-            <div className="divider" />
-            <div className="stat-label">Stress tests</div>
+            <hr className="divider" />
+            <h3 className="stat-label">Stress tests</h3>
 
             <Slider
               label="Market crash"
@@ -344,8 +346,8 @@ export function Scenarios() {
                 the only place the cost of that move is visible. */}
             {ladder.length > 0 && (
               <>
-                <div className="divider" />
-                <div className="stat-label">Invest differently</div>
+                <hr className="divider" />
+                <h3 className="stat-label">Invest differently</h3>
                 <RiskLadder
                   rows={ladder}
                   yourBucket={snapshot.risk.bucket}
@@ -367,7 +369,7 @@ export function Scenarios() {
               </>
             )}
 
-            <div className="divider" />
+            <hr className="divider" />
             <div className="row-wrap">
               <button
                 className="btn btn-sm"
@@ -396,20 +398,21 @@ export function Scenarios() {
           {/* Outcome headline. The deltas are the point - two large absolute
               numbers side by side make the reader do the subtraction. */}
           <Card
+            variant="primary"
             title={hasLevers ? result.label : 'Your current plan'}
             subtitle={dragging ? 'Recalculating…' : `Scored against ${result.monteCarlo.paths.toLocaleString('en-US')} simulated market paths`}
-            actions={dragging ? <span className="spinner" /> : undefined}
+            actions={dragging ? <span className="spinner" aria-hidden="true" /> : undefined}
           >
-            <div className="grid grid-4" style={{ gap: 14 }}>
+            <div className="grid grid-4">
               <Stat
                 label="Corpus at retirement"
-                value={formatCompact(result.snapshot.netWorthAtRetirement, currency)}
+                value={<AnimatedNumber value={result.snapshot.netWorthAtRetirement} format={money} />}
                 delta={hasLevers ? { value: result.deltaVsBaseline.netWorthAtRetirement, currency } : undefined}
                 meta="nominal, at the retirement date"
               />
               <Stat
                 label="Retirement funded"
-                value={formatPercent(result.snapshot.retirementReadiness, 0)}
+                value={<AnimatedNumber value={result.snapshot.retirementReadiness} format={wholePercent} />}
                 delta={
                   hasLevers
                     ? { value: Math.round(result.deltaVsBaseline.retirementReadiness * 100), suffix: ' pts' }
@@ -419,7 +422,7 @@ export function Scenarios() {
               />
               <Stat
                 label="Chance of success"
-                value={formatPercent(result.monteCarlo.successProbability, 0)}
+                value={<AnimatedNumber value={result.monteCarlo.successProbability} format={wholePercent} />}
                 meta={
                   result.monteCarlo.successProbability >= 0.7
                     ? 'In the range planners aim for'
@@ -435,11 +438,9 @@ export function Scenarios() {
               />
             </div>
 
-            <div style={{ marginTop: 14 }}>
-              <Callout tone={result.deltaVsBaseline.netWorthAtRetirement >= 0 ? 'positive' : 'warning'}>
-                {result.explanation}
-              </Callout>
-            </div>
+            <Callout tone={result.deltaVsBaseline.netWorthAtRetirement >= 0 ? 'positive' : 'warning'}>
+              {result.explanation}
+            </Callout>
           </Card>
 
           <Card
@@ -447,7 +448,7 @@ export function Scenarios() {
             subtitle="The spread matters more than the average. A single projected line is the least likely outcome of all."
           >
             <MonteCarloFan result={result.monteCarlo} currency={currency} />
-            <div className="grid grid-3" style={{ marginTop: 16, gap: 14 }}>
+            <div className="grid grid-3">
               <Stat
                 label="Bad run (10th pct)"
                 value={formatCompact(result.monteCarlo.p10, currency)}
@@ -515,7 +516,7 @@ export function Scenarios() {
                 currency={currency}
               />
               {pinnedLocally && (
-                <p className="text-xs text-subtle" style={{ marginTop: 8 }}>
+                <p className="text-xs text-subtle">
                   Scored in your browser — the server comparison was unreachable. Same engine, same
                   numbers; the only thing lost is the shared baseline.
                 </p>
@@ -573,7 +574,7 @@ export function Scenarios() {
                     return (
                       <tr key={g.goalId}>
                         <td>
-                          {g.goalName}
+                          {g.goalName}{' '}
                           {moved && (
                             <Badge tone={g.onTrack ? 'positive' : 'negative'}>
                               {g.onTrack ? 'now on track' : 'falls off track'}
@@ -585,7 +586,7 @@ export function Scenarios() {
                         <td className="right num">{formatPercent(g.fundedRatio, 0)}</td>
                         <td>
                           <Badge tone={g.onTrack ? 'positive' : 'warning'}>
-                            {g.onTrack ? 'Funded' : `Short ${formatCompact(Math.abs(g.surplus), currency)}`}
+                            {g.onTrack ? 'Funded' : `Short by ${formatCompact(Math.abs(g.surplus), currency)}`}
                           </Badge>
                         </td>
                       </tr>

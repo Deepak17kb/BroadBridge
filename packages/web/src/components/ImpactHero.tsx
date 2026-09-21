@@ -1,11 +1,11 @@
-import { useState } from 'react';
+import { useId, useState } from 'react';
 import {
   formatCompact,
   formatPercent,
   type ActionImpact,
   type Currency,
 } from '@wealth/shared';
-import { AssumptionList, Badge, Card } from './ui';
+import { AssumptionList, Badge, Card, SkeletonStats } from './ui';
 
 /**
  * What following the advice is worth, as the first thing on the dashboard.
@@ -57,15 +57,16 @@ export function ImpactHero({
   loading: boolean;
 }) {
   const [open, setOpen] = useState(false);
+  const breakdownId = useId();
 
   if (loading) {
     return (
-      <Card>
-        <div className="row" style={{ gap: 10 }}>
-          <span className="spinner" />
-          <span className="text-muted">Working out what your next actions are worth…</span>
-        </div>
-      </Card>
+      <section className="card card-primary" aria-busy="true">
+        <p className="text-sm text-muted" role="status">
+          Working out what your next actions are worth…
+        </p>
+        <SkeletonStats />
+      </section>
     );
   }
   if (!impact) return null;
@@ -89,16 +90,22 @@ export function ImpactHero({
 
   return (
     <Card
+      variant="primary"
       title={`Following your top ${applied.length} action${applied.length === 1 ? '' : 's'}`}
       subtitle="Applied in order, each credited only with what it adds on top of the ones above it"
       actions={
-        <button className="btn btn-sm" onClick={() => setOpen((o) => !o)}>
+        <button
+          className="btn btn-sm"
+          onClick={() => setOpen((o) => !o)}
+          aria-expanded={open}
+          aria-controls={open ? breakdownId : undefined}
+        >
           {open ? 'Hide the breakdown' : 'Show the breakdown'}
         </button>
       }
     >
       <div className="grid grid-4">
-        <div>
+        <div className="stat">
           <div className="stat-label">Wellness score</div>
           <div className="stat-value">
             <Delta before={before.wellnessScore} after={after.wellnessScore} format={(v) => String(v)} />
@@ -108,7 +115,7 @@ export function ImpactHero({
             {after.wellnessGrade !== before.wellnessGrade && ` → ${after.wellnessGrade}`}
           </div>
         </div>
-        <div>
+        <div className="stat">
           <div className="stat-label">Retirement funded</div>
           <div className="stat-value">
             <Delta
@@ -119,7 +126,7 @@ export function ImpactHero({
           </div>
           <div className="text-xs text-subtle">of the corpus you need</div>
         </div>
-        <div>
+        <div className="stat">
           <div className="stat-label">Median corpus</div>
           <div className="stat-value">
             <Delta
@@ -130,7 +137,7 @@ export function ImpactHero({
           </div>
           <div className="text-xs text-subtle">p50 of {impact.paths} seeded paths</div>
         </div>
-        <div>
+        <div className="stat">
           <div className="stat-label">Emergency cover</div>
           <div className="stat-value">
             <Delta
@@ -144,7 +151,7 @@ export function ImpactHero({
       </div>
 
       {before.totalInterestPaid > 0 && (
-        <p className="text-sm text-muted" style={{ marginTop: 12 }}>
+        <p className="text-sm text-muted">
           Debt is unchanged by these actions: {money(before.totalInterestPaid)} of interest over{' '}
           {before.monthsToDebtFree} months either way. Clearing it faster is on the Actions page, and
           it is not something the platform can do on your behalf.
@@ -152,7 +159,7 @@ export function ImpactHero({
       )}
 
       {open && (
-        <div style={{ marginTop: 16 }}>
+        <div id={breakdownId} className="stack">
           <div className="table-wrap">
             <table className="data">
               <thead>
@@ -192,29 +199,27 @@ export function ImpactHero({
           </div>
 
           {unaffordable.length > 0 && (
-            <>
-              <div className="card-title" style={{ marginTop: 16, marginBottom: 6 }}>
-                Excluded because your surplus will not carry them
-              </div>
-              <ul className="text-sm text-muted">
+            <section>
+              <h3 className="subhead">Excluded because your surplus will not carry them</h3>
+              <ul className="bullets text-sm text-muted">
                 {unaffordable.map((n) => (
                   <li key={n.id}>
                     <span className="strong">{n.title}</span> — {n.why}
                   </li>
                 ))}
               </ul>
-            </>
+            </section>
           )}
 
-          <div className="card-title" style={{ marginTop: 16, marginBottom: 6 }}>
-            Not counted here ({notModelled.length - unaffordable.length})
-          </div>
-          <p className="text-sm text-muted">
-            The rest of the ranked list needs you rather than the platform — buying a policy,
-            refinancing, opening an account.{' '}
-            <Badge>{applied.length} counted</Badge>{' '}
-            <Badge tone="warning">{notModelled.length} not</Badge>
-          </p>
+          <section>
+            <h3 className="subhead">Not counted here ({notModelled.length - unaffordable.length})</h3>
+            <p className="text-sm text-muted">
+              The rest of the ranked list needs you rather than the platform — buying a policy,
+              refinancing, opening an account.{' '}
+              <Badge>{applied.length} counted</Badge>{' '}
+              <Badge tone="warning">{notModelled.length} not</Badge>
+            </p>
+          </section>
 
           <AssumptionList assumptions={impact.assumptions} title="What this figure assumes" />
         </div>

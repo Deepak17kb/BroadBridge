@@ -11,7 +11,7 @@ import {
 } from '@wealth/shared';
 import { api, type PersonaSummary } from '../lib/api';
 import { useProfile } from '../state/ProfileContext';
-import { Callout, MoneyInput, NumberInput, ScoreRing } from '../components/ui';
+import { Badge, Callout, Icon, MoneyInput, NumberInput, ScoreRing, Skeleton } from '../components/ui';
 
 /**
  * Onboarding.
@@ -186,26 +186,35 @@ export function Onboarding() {
       <div className="onboarding-card">
         <header className="onboarding-head">
           <div className="row-between">
-            <div className="row" style={{ gap: 12 }}>
+            <div className="row gap-3">
               <div className="brand-mark" aria-hidden="true">
-                <svg width="19" height="19" viewBox="0 0 24 24" fill="none" stroke="#fff" strokeWidth="2.4" strokeLinecap="round" strokeLinejoin="round">
-                  <path d="M3 17l6-7 4 4 8-9" />
-                </svg>
+                <Icon name="trend" size={18} />
               </div>
               <div>
-                <h1 style={{ fontSize: '1.28rem' }}>AI Wealth Navigator</h1>
+                <h1 className="onboarding-title">AI Wealth Navigator</h1>
                 <div className="text-sm text-muted">{STEP_TITLES[step]}</div>
               </div>
             </div>
-            <button className="btn btn-icon btn-ghost" onClick={toggleTheme} aria-label="Toggle theme">
-              {theme === 'dark' ? '☀' : '☾'}
+            <button
+              className="btn btn-icon btn-ghost"
+              onClick={toggleTheme}
+              aria-label={`Switch to ${theme === 'dark' ? 'light' : 'dark'} theme`}
+            >
+              <Icon name={theme === 'dark' ? 'sun' : 'moon'} size={18} />
             </button>
           </div>
           {step > 0 && (
-            <div className="steps" aria-label={`Step ${step} of 5`}>
+            <div
+              className="steps"
+              role="progressbar"
+              aria-valuemin={1}
+              aria-valuemax={5}
+              aria-valuenow={step}
+              aria-valuetext={`Step ${step} of 5`}
+            >
               {[1, 2, 3, 4, 5].map((n) => (
                 <div key={n} className={`step-pip ${n < step ? 'done' : n === step ? 'active' : ''}`}>
-                  <div className="bar-fill" style={{ width: n <= step ? '100%' : '0%' }} />
+                  <div className="bar-fill" />
                 </div>
               ))}
             </div>
@@ -217,16 +226,14 @@ export function Onboarding() {
 
           {step === 0 && (
             <div className="stack">
-              <p className="text-muted" style={{ maxWidth: '62ch' }}>
+              <p className="text-muted measure">
                 Understand where you stand, test what-if scenarios against thousands of simulated
                 markets, and get next steps that show their own arithmetic. Every projection tells
                 you what it assumed.
               </p>
 
-              <div>
-                <div className="stat-label" style={{ marginBottom: 9 }}>
-                  Explore a sample profile
-                </div>
+              <section>
+                <h2 className="stat-label mb-2">Explore a sample profile</h2>
                 <div className="persona-grid">
                   {personas.map((p) => (
                     <button
@@ -234,23 +241,27 @@ export function Onboarding() {
                       className={`persona ${selectedPersona === p.id ? 'selected' : ''}`}
                       onClick={() => setSelectedPersona(p.id)}
                       disabled={busy}
+                      aria-pressed={selectedPersona === p.id}
                     >
-                      <div className="strong text-sm">{p.label}</div>
-                      <div className="text-xs text-muted" style={{ marginTop: 3 }}>
-                        {p.tagline}
-                      </div>
-                      <div className="text-xs text-subtle" style={{ marginTop: 8, lineHeight: 1.45 }}>
-                        {p.challenge}
-                      </div>
+                      <span className="persona-name">{p.label}</span>
+                      <span className="persona-tagline">{p.tagline}</span>
+                      <span className="persona-challenge">{p.challenge}</span>
                     </button>
                   ))}
                   {personas.length === 0 && (
-                    <div className="text-sm text-subtle">Loading sample profiles…</div>
+                    <>
+                      <span className="sr-only" role="status">
+                        Loading sample profiles
+                      </span>
+                      {[0, 1, 2].map((n) => (
+                        <Skeleton key={n} variant="block" />
+                      ))}
+                    </>
                   )}
                 </div>
-              </div>
+              </section>
 
-              <div className="row-wrap" style={{ gap: 10 }}>
+              <div className="row-wrap">
                 <button
                   className="btn btn-primary"
                   disabled={!selectedPersona || busy}
@@ -273,7 +284,7 @@ export function Onboarding() {
 
           {step === 1 && (
             <div className="stack">
-              <div className="grid grid-2">
+              <div className="form-grid">
                 <div className="field">
                   <label htmlFor="ob-name">What should we call you?</label>
                   <input
@@ -370,26 +381,21 @@ export function Onboarding() {
                 />
                 <div className="field">
                   <label htmlFor="ob-growth">Expected annual pay rise</label>
-                  <div className="input-prefix">
-                    <NumberInput
-                      id="ob-growth"
-                      className="input num"
-                      min={0}
-                      max={50}
-                      step={1}
-                      style={{ paddingLeft: 11 }}
-                      value={asPercent(draft.cashflow.annualIncomeGrowthPct)}
-                      onChange={(v) => update((d) => void (d.cashflow.annualIncomeGrowthPct = v / 100))}
-                    />
-                  </div>
+                  <NumberInput
+                    id="ob-growth"
+                    className="input num"
+                    min={0}
+                    max={50}
+                    step={1}
+                    value={asPercent(draft.cashflow.annualIncomeGrowthPct)}
+                    onChange={(v) => update((d) => void (d.cashflow.annualIncomeGrowthPct = v / 100))}
+                  />
                   <div className="field-hint">Percent per year. Drives the step-up recommendation.</div>
                 </div>
               </div>
 
-              <div>
-                <div className="stat-label" style={{ marginBottom: 9 }}>
-                  Monthly spending by category
-                </div>
+              <section>
+                <h2 className="stat-label mb-2">Monthly spending by category</h2>
                 <div className="expense-grid">
                   {Object.entries(draft.cashflow.monthlyExpenses).map(([category, amount]) => (
                     <MoneyInput
@@ -402,7 +408,7 @@ export function Onboarding() {
                     />
                   ))}
                 </div>
-              </div>
+              </section>
 
               <MoneyInput
                 label="Cash and savings you can reach within a day"
@@ -449,10 +455,10 @@ export function Onboarding() {
                 />
               </div>
 
-              <div className="divider" />
+              <hr className="divider" />
 
               <div className="row-between">
-                <div className="stat-label">Investments</div>
+                <h2 className="stat-label">Investments</h2>
                 <button
                   className="btn btn-sm"
                   onClick={() =>
@@ -470,24 +476,22 @@ export function Onboarding() {
                     )
                   }
                 >
-                  + Add holding
+                  <Icon name="plus" /> Add holding
                 </button>
               </div>
               {draft.holdings.length === 0 && (
                 <div className="text-sm text-subtle">No investments added yet.</div>
               )}
               {draft.holdings.map((h, i) => (
-                <div className="row-wrap" key={h.id} style={{ gap: 8 }}>
+                <div className="entry-row" key={h.id}>
                   <input
-                    className="input"
-                    style={{ flex: '2 1 150px' }}
+                    className="input entry-name"
                     value={h.name}
                     aria-label="Holding name"
                     onChange={(e) => update((d) => void (d.holdings[i]!.name = e.target.value))}
                   />
                   <select
-                    className="select"
-                    style={{ flex: '1 1 130px' }}
+                    className="select entry-field"
                     value={h.assetClass}
                     aria-label="Asset class"
                     onChange={(e) =>
@@ -502,8 +506,7 @@ export function Onboarding() {
                     <option value="cash">Cash</option>
                   </select>
                   <select
-                    className="select"
-                    style={{ flex: '0 1 112px' }}
+                    className="select entry-narrow"
                     value={h.instrumentKind ?? 'fund'}
                     aria-label="Instrument type"
                     onChange={(e) =>
@@ -514,8 +517,9 @@ export function Onboarding() {
                     <option value="security">Single stock</option>
                     <option value="deposit">Deposit</option>
                   </select>
-                  <div style={{ flex: '1 1 118px' }}>
+                  <div className="entry-field">
                     <MoneyInput
+                      ariaLabel={`Value of ${h.name}`}
                       value={h.units * h.price}
                       currency={draft.currency}
                       step={10000}
@@ -540,10 +544,10 @@ export function Onboarding() {
                 </div>
               ))}
 
-              <div className="divider" />
+              <hr className="divider" />
 
               <div className="row-between">
-                <div className="stat-label">Loans and debts</div>
+                <h2 className="stat-label">Loans and debts</h2>
                 <button
                   className="btn btn-sm"
                   onClick={() =>
@@ -559,24 +563,22 @@ export function Onboarding() {
                     )
                   }
                 >
-                  + Add debt
+                  <Icon name="plus" /> Add debt
                 </button>
               </div>
               {draft.liabilities.length === 0 && (
                 <div className="text-sm text-subtle">No debts added - good place to be.</div>
               )}
               {draft.liabilities.map((l, i) => (
-                <div className="row-wrap" key={l.id} style={{ gap: 8 }}>
+                <div className="entry-row" key={l.id}>
                   <input
-                    className="input"
-                    style={{ flex: '2 1 140px' }}
+                    className="input entry-name"
                     value={l.name}
                     aria-label="Debt name"
                     onChange={(e) => update((d) => void (d.liabilities[i]!.name = e.target.value))}
                   />
                   <select
-                    className="select"
-                    style={{ flex: '1 1 130px' }}
+                    className="select entry-field"
                     value={l.kind}
                     aria-label="Debt type"
                     onChange={(e) => update((d) => void (d.liabilities[i]!.kind = e.target.value as typeof l.kind))}
@@ -588,15 +590,16 @@ export function Onboarding() {
                     <option value="education_loan">Education loan</option>
                     <option value="other">Other</option>
                   </select>
-                  <div style={{ flex: '1 1 118px' }}>
+                  <div className="entry-field">
                     <MoneyInput
+                      ariaLabel={`Outstanding on ${l.name}`}
                       value={l.outstanding}
                       currency={draft.currency}
                       step={10000}
                       onChange={(v) => update((d) => void (d.liabilities[i]!.outstanding = v))}
                     />
                   </div>
-                  <div style={{ flex: '0 1 88px' }} className="field">
+                  <div className="field entry-rate">
                     <NumberInput
                       className="input num"
                       min={0}
@@ -608,8 +611,9 @@ export function Onboarding() {
                     />
                     <div className="field-hint">% APR</div>
                   </div>
-                  <div style={{ flex: '1 1 104px' }}>
+                  <div className="entry-field">
                     <MoneyInput
+                      ariaLabel={`EMI for ${l.name}`}
                       value={l.emi}
                       currency={draft.currency}
                       step={1000}
@@ -630,13 +634,13 @@ export function Onboarding() {
 
           {step === 4 && (
             <div className="stack">
-              <div className="row-between">
-                <p className="text-sm text-muted" style={{ margin: 0, maxWidth: '54ch' }}>
+              <div className="row-between wrap">
+                <p className="text-sm text-muted measure m-0">
                   Name what you are actually saving for. Goals with names get funded; "investing in
                   general" does not.
                 </p>
                 <button className="btn btn-sm" onClick={() => update((d) => d.goals.push(newGoal()))}>
-                  + Add goal
+                  <Icon name="plus" /> Add goal
                 </button>
               </div>
 
@@ -667,7 +671,7 @@ export function Onboarding() {
                           )
                         }
                       >
-                        + {s.name}
+                        <Icon name="plus" size={12} /> {s.name}
                       </button>
                     ))}
                   </div>
@@ -675,11 +679,10 @@ export function Onboarding() {
               )}
 
               {draft.goals.map((g, i) => (
-                <div className="card" key={g.id} style={{ padding: 14 }}>
-                  <div className="row-between" style={{ marginBottom: 10 }}>
+                <div className="card" key={g.id}>
+                  <div className="row-between mb-3">
                     <input
-                      className="input"
-                      style={{ maxWidth: 260, fontWeight: 600 }}
+                      className="input input-title"
                       value={g.name}
                       aria-label="Goal name"
                       onChange={(e) => update((d) => void (d.goals[i]!.name = e.target.value))}
@@ -687,6 +690,7 @@ export function Onboarding() {
                     <button
                       className="btn btn-sm btn-danger"
                       onClick={() => update((d) => void d.goals.splice(i, 1))}
+                      aria-label={`Remove ${g.name}`}
                     >
                       Remove
                     </button>
@@ -763,7 +767,7 @@ export function Onboarding() {
                   {preview?.goalProjections
                     .filter((p) => p.goalId === g.id)
                     .map((p) => (
-                      <div key={p.goalId} className="text-xs text-muted" style={{ marginTop: 10 }}>
+                      <p key={p.goalId} className="text-xs text-muted mt-3">
                         Projects to <strong>{formatCompact(p.projectedCorpus, draft.currency)}</strong> against{' '}
                         <strong>{formatCompact(p.inflatedTarget, draft.currency)}</strong> needed —{' '}
                         {p.onTrack ? (
@@ -773,7 +777,7 @@ export function Onboarding() {
                             needs {formatCompact(p.requiredMonthly, draft.currency)}/month
                           </span>
                         )}
-                      </div>
+                      </p>
                     ))}
                 </div>
               ))}
@@ -781,14 +785,14 @@ export function Onboarding() {
           )}
 
           {step === 5 && (
-            <div className="grid grid-sidebar" style={{ alignItems: 'start' }}>
+            <div className="grid grid-sidebar">
               <div className="stack">
                 {RISK_QUESTIONS.map((q) => (
                   <div key={q.id}>
-                    <div className="field-label" style={{ marginBottom: 7 }}>
+                    <div className="field-label mb-2" id={`ob-q-${q.id}`}>
                       {q.prompt}
                     </div>
-                    <div className="stack-sm">
+                    <div className="stack-sm" role="radiogroup" aria-labelledby={`ob-q-${q.id}`}>
                       {q.options.map((opt, idx) => {
                         const checked = draft.riskAnswers[q.id] === idx;
                         return (
@@ -808,17 +812,15 @@ export function Onboarding() {
                 ))}
               </div>
 
-              <div className="card" style={{ position: 'sticky', top: 12 }}>
-                <div className="card-title" style={{ marginBottom: 12 }}>
-                  Your risk assessment
-                </div>
+              <div className="card sticky-aside">
+                <h2 className="card-title mb-3">Your risk assessment</h2>
                 {risk ? (
                   <div className="stack-sm">
-                    <div className="row" style={{ gap: 14 }}>
+                    <div className="row gap-4">
                       <ScoreRing score={risk.effectiveScore} size={98} />
                       <div>
-                        <div className="badge badge-accent">{risk.bucket}</div>
-                        <div className="text-xs text-muted" style={{ marginTop: 7 }}>
+                        <Badge tone="accent">{risk.bucket}</Badge>
+                        <div className="text-xs text-muted mt-2">
                           Willingness {risk.toleranceScore}/100
                           <br />
                           Ability {risk.capacityScore}/100
@@ -829,11 +831,11 @@ export function Onboarding() {
                       The plan follows whichever is lower, so nobody is talked into a portfolio they
                       would abandon in a downturn.
                     </div>
-                    {risk.drivers.slice(0, 3).map((d) => (
-                      <div className="text-xs text-subtle" key={d}>
-                        • {d}
-                      </div>
-                    ))}
+                    <ul className="bullets text-xs text-subtle">
+                      {risk.drivers.slice(0, 3).map((d) => (
+                        <li key={d}>{d}</li>
+                      ))}
+                    </ul>
                   </div>
                 ) : (
                   <div className="text-sm text-subtle">Answer the questions to see your profile.</div>
@@ -852,7 +854,7 @@ export function Onboarding() {
             Back
           </button>
 
-          <div className="row" style={{ gap: 10 }}>
+          <div className="row gap-3">
             {step > 0 && step < 5 && preview && (
               <span className="text-xs text-subtle">
                 Wellness preview: <strong className="text-sm">{preview.wellness.total}/100</strong>

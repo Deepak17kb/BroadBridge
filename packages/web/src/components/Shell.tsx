@@ -1,57 +1,34 @@
-import { useEffect, useState, type ReactNode } from 'react';
+import { useEffect, useRef, useState, type ReactNode } from 'react';
 import { NavLink, useLocation } from 'react-router-dom';
 import { useProfile } from '../state/ProfileContext';
 import { api, type HealthInfo } from '../lib/api';
+import { Icon, type IconName } from './ui';
 
 /**
- * Application shell: sidebar navigation, top bar, and the always-visible
+ * Application shell: navigation, top bar, and the always-visible
  * synthetic-data notice.
  *
- * The engine badge in the top bar is deliberate. The platform runs with Claude
- * on Bedrock, the direct Claude API, or no model at all, and which one is
- * active changes how the assistant answers - so it is stated rather than
- * hidden.
+ * The engine badge is deliberate. The platform runs with Claude on Bedrock,
+ * the direct Claude API, Groq, or no model at all, and which one is active
+ * changes how the assistant answers - so it is stated rather than hidden.
+ *
+ * Below 900px the navigation is a drawer. The closed drawer is `visibility:
+ * hidden` (in the stylesheet), so its links leave the tab order; Escape closes
+ * it and focus returns to the button that opened it.
  */
 
-const ICONS = {
-  dashboard: 'M3 13h8V3H3v10Zm10 8h8V11h-8v10ZM3 21h8v-6H3v6Zm10-12h8V3h-8v6Z',
-  goals: 'M12 2a10 10 0 1 0 0 20 10 10 0 0 0 0-20Zm0 5a5 5 0 1 0 0 10 5 5 0 0 0 0-10Zm0 3a2 2 0 1 1 0 4 2 2 0 0 1 0-4Z',
-  scenarios: 'M3 17l6-6 4 4 8-8M21 7h-5m5 0v5',
-  portfolio: 'M3 3v18h18M7 15v3M12 9v9M17 5v13',
-  actions: 'M13 2 4 14h6l-1 8 9-12h-6l1-8Z',
-  assistant: 'M4 4h16v11H9l-5 4V4Z',
-  profile: 'M12 12a4 4 0 1 0 0-8 4 4 0 0 0 0 8Zm0 2c-4 0-7 2-7 4.5V21h14v-2.5C19 16 16 14 12 14Z',
-  assumptions: 'M12 2 2 7l10 5 10-5-10-5Zm0 20 10-5V9l-10 5-10-5v8l10 5Z',
-} as const;
+const NAV: { to: string; label: string; icon: IconName; group: string }[] = [
+  { to: '/dashboard', label: 'Dashboard', icon: 'dashboard', group: 'Overview' },
+  { to: '/actions', label: 'Next Best Actions', icon: 'actions', group: 'Overview' },
+  { to: '/goals', label: 'Goals', icon: 'goals', group: 'Plan' },
+  { to: '/scenarios', label: 'Scenario Lab', icon: 'scenarios', group: 'Plan' },
+  { to: '/portfolio', label: 'Portfolio', icon: 'portfolio', group: 'Plan' },
+  { to: '/assistant', label: 'AI Assistant', icon: 'assistant', group: 'Intelligence' },
+  { to: '/assumptions', label: 'Assumptions', icon: 'assumptions', group: 'Intelligence' },
+  { to: '/profile', label: 'My Details', icon: 'profile', group: 'Settings' },
+];
 
-function Icon({ path, filled = false }: { path: string; filled?: boolean }) {
-  return (
-    <svg
-      width="17"
-      height="17"
-      viewBox="0 0 24 24"
-      fill={filled ? 'currentColor' : 'none'}
-      stroke={filled ? 'none' : 'currentColor'}
-      strokeWidth="1.9"
-      strokeLinecap="round"
-      strokeLinejoin="round"
-      aria-hidden="true"
-    >
-      <path d={path} />
-    </svg>
-  );
-}
-
-const NAV = [
-  { to: '/dashboard', label: 'Dashboard', icon: ICONS.dashboard, filled: true, group: 'Overview' },
-  { to: '/actions', label: 'Next Best Actions', icon: ICONS.actions, filled: true, group: 'Overview' },
-  { to: '/goals', label: 'Goals', icon: ICONS.goals, filled: true, group: 'Plan' },
-  { to: '/scenarios', label: 'Scenario Lab', icon: ICONS.scenarios, filled: false, group: 'Plan' },
-  { to: '/portfolio', label: 'Portfolio', icon: ICONS.portfolio, filled: false, group: 'Plan' },
-  { to: '/assistant', label: 'AI Assistant', icon: ICONS.assistant, filled: false, group: 'Intelligence' },
-  { to: '/assumptions', label: 'Assumptions', icon: ICONS.assumptions, filled: true, group: 'Intelligence' },
-  { to: '/profile', label: 'My Details', icon: ICONS.profile, filled: true, group: 'Settings' },
-] as const;
+const GROUPS = [...new Set(NAV.map((n) => n.group))];
 
 const ENGINE_LABEL: Record<HealthInfo['engine'], { text: string; tone: string; title: string }> = {
   bedrock: {
@@ -83,29 +60,47 @@ export function Shell({ children, title }: { children: ReactNode; title: string 
   const [health, setHealth] = useState<HealthInfo | null>(null);
   const [navOpen, setNavOpen] = useState(false);
   const location = useLocation();
+  const toggleRef = useRef<HTMLButtonElement>(null);
+  const navRef = useRef<HTMLElement>(null);
 
   useEffect(() => {
     api.health().then(setHealth).catch(() => setHealth(null));
   }, []);
 
-  // Close the mobile drawer on navigation, or it covers the page you just opened.
+  // Close the drawer on navigation, or it covers the page you just opened.
   useEffect(() => setNavOpen(false), [location.pathname]);
 
+  // Escape closes the drawer; focus moves into it on open and back on close.
+  useEffect(() => {
+    if (!navOpen) return;
+    navRef.current?.querySelector<HTMLElement>('a')?.focus();
+    const onKey = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') {
+        setNavOpen(false);
+        toggleRef.current?.focus();
+      }
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [navOpen]);
+
   const urgentActions = snapshot?.actions.filter((a) => a.priorityScore >= 70).length ?? 0;
-  const groups = [...new Set(NAV.map((n) => n.group))];
   const engine = health ? ENGINE_LABEL[health.engine] : null;
 
   return (
     <div className="app-shell">
       {navOpen && (
-        <button className="sidebar-backdrop" onClick={() => setNavOpen(false)} aria-label="Close navigation" />
+        <button
+          className="sidebar-backdrop"
+          onClick={() => setNavOpen(false)}
+          aria-label="Close navigation"
+          tabIndex={-1}
+        />
       )}
-      <aside className={`sidebar ${navOpen ? 'open' : ''}`.trim()}>
+      <aside id="app-nav" className={`sidebar ${navOpen ? 'open' : ''}`.trim()} ref={navRef}>
         <div className="brand">
           <div className="brand-mark" aria-hidden="true">
-            <svg width="19" height="19" viewBox="0 0 24 24" fill="none" stroke="#fff" strokeWidth="2.4" strokeLinecap="round" strokeLinejoin="round">
-              <path d="M3 17l6-7 4 4 8-9" />
-            </svg>
+            <Icon name="trend" size={18} />
           </div>
           <div>
             <div className="brand-name">Wealth Navigator</div>
@@ -114,17 +109,17 @@ export function Shell({ children, title }: { children: ReactNode; title: string 
         </div>
 
         <nav className="stack-sm" aria-label="Main">
-          {groups.map((group) => (
+          {GROUPS.map((group) => (
             <div className="nav-group" key={group}>
               <div className="nav-label">{group}</div>
               {NAV.filter((n) => n.group === group).map((item) => (
                 <NavLink
                   key={item.to}
                   to={item.to}
-                  className={({ isActive }) => `nav-item ${isActive ? 'active' : ''}`}
+                  className={({ isActive }) => `nav-item ${isActive ? 'active' : ''}`.trim()}
                 >
-                  <Icon path={item.icon} filled={item.filled} />
-                  {item.label}
+                  <Icon name={item.icon} size={18} />
+                  <span className="truncate">{item.label}</span>
                   {item.to === '/actions' && urgentActions > 0 && (
                     <span className="nav-badge" title={`${urgentActions} high-priority actions`}>
                       {urgentActions}
@@ -136,22 +131,20 @@ export function Shell({ children, title }: { children: ReactNode; title: string 
           ))}
         </nav>
 
-        <div style={{ marginTop: 'auto' }} className="stack-sm">
+        <div className="sidebar-foot">
           {engine && (
-            <div className="card" style={{ padding: 11 }} title={engine.title}>
-              <div className="stat-label" style={{ marginBottom: 5 }}>
-                Reasoning engine
-              </div>
+            <div className="engine-card" title={engine.title}>
+              <div className="stat-label">Reasoning engine</div>
               <span className={`badge ${engine.tone}`}>{engine.text}</span>
-              {health?.model && (
-                <div className="text-xs text-subtle num" style={{ marginTop: 5 }}>
-                  {health.model}
-                </div>
-              )}
+              {health?.model && <div className="text-xs text-subtle num">{health.model}</div>}
             </div>
           )}
           {profile && (
-            <button className="btn btn-ghost btn-sm" onClick={reset} title="Return to the start screen and pick a different profile">
+            <button
+              className="btn btn-ghost btn-sm"
+              onClick={reset}
+              title="Return to the start screen and pick a different profile"
+            >
               Switch profile
             </button>
           )}
@@ -161,31 +154,19 @@ export function Shell({ children, title }: { children: ReactNode; title: string 
       <div className="main">
         <header className="topbar">
           <button
-            className="btn btn-icon btn-ghost"
-            onClick={() => setNavOpen((o) => !o)}
-            aria-label="Toggle navigation"
-            style={{ display: 'none' }}
-            data-mobile-toggle
+            ref={toggleRef}
+            className="btn btn-icon btn-ghost nav-toggle"
+            onClick={() => setNavOpen((open) => !open)}
+            aria-label={navOpen ? 'Close navigation' : 'Open navigation'}
+            aria-expanded={navOpen}
+            aria-controls="app-nav"
           >
-            <svg width="18" height="18" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2" fill="none" strokeLinecap="round">
-              <path d="M3 6h18M3 12h18M3 18h18" />
-            </svg>
+            <Icon name={navOpen ? 'close' : 'menu'} size={18} />
           </button>
           <span className="topbar-title">{title}</span>
           <span className="topbar-spacer" />
 
-          {saveState === 'saving' && (
-            <span className="text-xs text-subtle row" style={{ gap: 6 }}>
-              <span className="spinner" /> Saving
-            </span>
-          )}
-          {saveState === 'saved' && <span className="text-xs text-positive">✓ Saved</span>}
-          {saveState === 'error' && (
-            <span className="text-xs text-negative" title="Your changes are safe locally but could not be saved to the server">
-              ⚠ Not saved
-            </span>
-          )}
-
+          <SaveState state={saveState} />
 
           <button
             className="btn btn-icon btn-ghost"
@@ -193,15 +174,7 @@ export function Shell({ children, title }: { children: ReactNode; title: string 
             aria-label={`Switch to ${theme === 'dark' ? 'light' : 'dark'} theme`}
             title={`Switch to ${theme === 'dark' ? 'light' : 'dark'} theme`}
           >
-            {theme === 'dark' ? (
-              <svg width="17" height="17" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
-                <path d="M12 17a5 5 0 1 0 0-10 5 5 0 0 0 0 10Zm0-13V2m0 20v-2m8-8h2M2 12h2m13.7-5.7 1.4-1.4M4.9 19.1l1.4-1.4m0-11.4L4.9 4.9m14.2 14.2-1.4-1.4" stroke="currentColor" strokeWidth="1.8" fill="none" strokeLinecap="round" />
-              </svg>
-            ) : (
-              <svg width="17" height="17" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
-                <path d="M21 13a9 9 0 1 1-10-10 7 7 0 0 0 10 10Z" />
-              </svg>
-            )}
+            <Icon name={theme === 'dark' ? 'sun' : 'moon'} size={18} />
           </button>
         </header>
 
@@ -213,10 +186,32 @@ export function Shell({ children, title }: { children: ReactNode; title: string 
 
         <main className="page">{children}</main>
       </div>
-
-      {/* The hamburger only exists below the layout breakpoint. Driving it from
-          CSS keeps the breakpoint defined in exactly one place. */}
-      <style>{`@media (max-width: 900px) { [data-mobile-toggle] { display: inline-flex !important; } }`}</style>
     </div>
+  );
+}
+
+/** "Saving", "Saved" or "Not saved" - announced politely to screen readers. */
+function SaveState({ state }: { state: 'idle' | 'saving' | 'saved' | 'error' }) {
+  return (
+    <span className="save-state" role="status" aria-live="polite">
+      {state === 'saving' && (
+        <>
+          <span className="spinner" aria-hidden="true" /> Saving
+        </>
+      )}
+      {state === 'saved' && (
+        <span className="row gap-1 text-positive">
+          <Icon name="check" size={12} /> Saved
+        </span>
+      )}
+      {state === 'error' && (
+        <span
+          className="row gap-1 text-negative"
+          title="Your changes are safe on this device but could not be saved to the server"
+        >
+          <Icon name="alertCircle" size={12} /> Not saved
+        </span>
+      )}
+    </span>
   );
 }

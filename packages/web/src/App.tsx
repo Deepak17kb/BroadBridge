@@ -1,5 +1,6 @@
 import { Navigate, Route, Routes, useLocation } from 'react-router-dom';
 import { Shell } from './components/Shell';
+import { PageSkeleton, Skeleton } from './components/ui';
 import { useProfile } from './state/ProfileContext';
 import { Onboarding } from './pages/Onboarding';
 import { Dashboard } from './pages/Dashboard';
@@ -33,20 +34,33 @@ const TITLES: Record<string, string> = {
 function Protected({ children }: { children: React.ReactNode }) {
   const { profile, loading } = useProfile();
   const location = useLocation();
+  const title = TITLES[location.pathname] ?? 'AI Wealth Navigator';
 
+  // The saved plan is being restored: show the page's shape, not a spinner.
   if (loading) {
     return (
-      <div className="onboarding">
-        <div className="row" style={{ gap: 12 }}>
-          <span className="spinner" />
-          <span className="text-muted">Loading your plan…</span>
-        </div>
-      </div>
+      <Shell title={title}>
+        <PageSkeleton />
+      </Shell>
     );
   }
   if (!profile) return <Navigate to="/" replace />;
 
-  return <Shell title={TITLES[location.pathname] ?? 'AI Wealth Navigator'}>{children}</Shell>;
+  return <Shell title={title}>{children}</Shell>;
+}
+
+/** Before we know whether there is a saved plan to go back to. */
+function StartLoading() {
+  return (
+    <div className="onboarding" role="status" aria-live="polite">
+      <span className="sr-only">Loading</span>
+      <div className="onboarding-card onboarding-body stack-sm" aria-hidden="true">
+        <Skeleton variant="title" />
+        <Skeleton />
+        <Skeleton width="70%" />
+      </div>
+    </div>
+  );
 }
 
 export function App() {
@@ -58,9 +72,7 @@ export function App() {
         path="/"
         element={
           loading ? (
-            <div className="onboarding">
-              <span className="spinner" />
-            </div>
+            <StartLoading />
           ) : profile ? (
             <Navigate to="/dashboard" replace />
           ) : (

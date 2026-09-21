@@ -96,13 +96,7 @@ export function RiskLadder({
               return (
                 <tr
                   key={row.bucket}
-                  style={
-                    isSelected
-                      ? { background: 'var(--accent-soft)', outline: '1px solid var(--accent)' }
-                      : isYours
-                        ? { background: 'var(--accent-soft)' }
-                        : undefined
-                  }
+                  className={isSelected ? 'is-selected' : isYours ? 'is-highlighted' : undefined}
                 >
                   <td>
                     {onSelect ? (
@@ -121,7 +115,7 @@ export function RiskLadder({
                   <td className="right num">{formatPercent(row.expectedReturnPct)}</td>
                   <td className="right num">{formatPercent(row.volatilityPct)}</td>
                   <td className="right num">{formatPercent(equityShare(row.weights), 0)}</td>
-                  <td style={{ minWidth: 190 }}>
+                  <td className="cell-wide">
                     <AllocationBar weights={row.weights as Record<AssetClass, number>} label="" />
                   </td>
                 </tr>
@@ -131,9 +125,7 @@ export function RiskLadder({
         </table>
       </div>
       {footnote && (
-        <p className="text-xs text-subtle" style={{ marginTop: 11 }}>
-          {footnote}
-        </p>
+        <p className="text-xs text-subtle mt-3">{footnote}</p>
       )}
     </>
   );

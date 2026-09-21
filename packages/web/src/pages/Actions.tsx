@@ -7,7 +7,7 @@ import {
   type NextBestAction,
 } from '@wealth/shared';
 import { useProfile, useLoadedProfile } from '../state/ProfileContext';
-import { AssumptionList, Badge, Callout, Card, Empty, Stat } from '../components/ui';
+import { AssumptionList, Badge, Callout, Card, EmptyState, Icon, Stat } from '../components/ui';
 
 /**
  * The action list.
@@ -132,10 +132,11 @@ export function Actions() {
         </Callout>
       )}
 
-      <div className="row-wrap">
+      <div className="row-wrap" role="group" aria-label="Show actions by category">
         <button
           className={`btn btn-sm ${filter === 'all' ? 'btn-primary' : ''}`}
           onClick={() => setFilter('all')}
+          aria-pressed={filter === 'all'}
         >
           All ({snapshot.actions.length})
         </button>
@@ -144,6 +145,7 @@ export function Actions() {
             key={c}
             className={`btn btn-sm ${filter === c ? 'btn-primary' : ''}`}
             onClick={() => setFilter(c)}
+            aria-pressed={filter === c}
           >
             {CATEGORY_LABELS[c]} ({snapshot.actions.filter((a) => a.category === c).length})
           </button>
@@ -152,85 +154,99 @@ export function Actions() {
 
       {visible.length === 0 ? (
         <Card>
-          <Empty
+          <EmptyState
             title="Nothing outstanding here"
             message="No actions in this category. Your plan passes every check the engine runs for it."
           />
         </Card>
       ) : (
-        <div className="stack">
+        <ol className="list-plain stack stagger" aria-label="Actions, highest priority first">
           {visible.map((action, index) => {
             const isOpen = expanded === action.id;
             const wasApplied = applied.includes(action.id);
+            const detailId = `action-steps-${action.id}`;
             return (
-              <article className="action" key={action.id}>
-                <div className="action-top">
-                  <span className="action-rank">{index + 1}</span>
-                  <div className="action-body">
-                    <div className="action-title">{action.title}</div>
-                    <p className="action-why">{action.why}</p>
-                    <div className="row-wrap" style={{ marginTop: 9 }}>
-                      <Badge tone={CATEGORY_TONE[action.category]}>{CATEGORY_LABELS[action.category]}</Badge>
-                      <Badge tone={action.effort === 'low' ? 'positive' : action.effort === 'medium' ? 'warning' : 'negative'}>
-                        {action.effort} effort
-                      </Badge>
-                      <Badge>priority {Math.round(action.priorityScore)}</Badge>
-                      {wasApplied && <Badge tone="positive">applied</Badge>}
+              <li key={action.id}>
+                <article className="action">
+                  <div className="action-top">
+                    <span className="action-rank" aria-hidden="true">
+                      {index + 1}
+                    </span>
+                    <div className="action-body">
+                      <h2 className="action-title">{action.title}</h2>
+                      <p className="action-why">{action.why}</p>
+                      <div className="row-wrap mt-2">
+                        <Badge tone={CATEGORY_TONE[action.category]}>{CATEGORY_LABELS[action.category]}</Badge>
+                        <Badge tone={action.effort === 'low' ? 'positive' : action.effort === 'medium' ? 'warning' : 'negative'}>
+                          {action.effort} effort
+                        </Badge>
+                        <Badge>priority {Math.round(action.priorityScore)}</Badge>
+                        {wasApplied && <Badge tone="positive">applied</Badge>}
+                      </div>
+                    </div>
+                    <div className="action-impact">
+                      <div className="action-impact-value">
+                        {action.impact.unit === 'currency'
+                          ? formatCompact(action.impact.value, currency)
+                          : action.impact.unit === 'percent'
+                            ? `${action.impact.value}%`
+                            : `${action.impact.value} ${action.impact.unit}`}
+                      </div>
+                      <div className="action-impact-label">{action.impact.metric}</div>
                     </div>
                   </div>
-                  <div className="action-impact">
-                    <div className="action-impact-value">
-                      {action.impact.unit === 'currency'
-                        ? formatCompact(action.impact.value, currency)
-                        : action.impact.unit === 'percent'
-                          ? `${action.impact.value}%`
-                          : `${action.impact.value} ${action.impact.unit}`}
-                    </div>
-                    <div className="action-impact-label">{action.impact.metric}</div>
-                  </div>
-                </div>
 
-                <div className="action-detail">
-                  <div className="row-between" style={{ marginBottom: isOpen ? 12 : 0 }}>
-                    <button className="btn btn-sm btn-ghost" onClick={() => setExpanded(isOpen ? null : action.id)}>
-                      {isOpen ? 'Hide detail' : 'How do I do this?'}
-                    </button>
-                    {action.apply && (
+                  <div className="action-detail">
+                    <div className={`row-between wrap ${isOpen ? 'mb-3' : ''}`.trim()}>
                       <button
-                        className={`btn btn-sm ${wasApplied ? '' : 'btn-primary'}`}
-                        onClick={() => apply(action)}
-                        disabled={wasApplied}
-                        title={
-                          wasApplied
-                            ? 'Already applied to your plan'
-                            : 'Applies this change to your plan and recalculates everything'
-                        }
+                        className="btn btn-sm btn-ghost"
+                        onClick={() => setExpanded(isOpen ? null : action.id)}
+                        aria-expanded={isOpen}
+                        aria-controls={isOpen ? detailId : undefined}
                       >
-                        {wasApplied ? '✓ Applied' : 'Apply to my plan'}
+                        {isOpen ? 'Hide detail' : 'How do I do this?'}
                       </button>
+                      {action.apply && (
+                        <button
+                          className={`btn btn-sm ${wasApplied ? '' : 'btn-primary'}`}
+                          onClick={() => apply(action)}
+                          disabled={wasApplied}
+                          title={
+                            wasApplied
+                              ? 'Already applied to your plan'
+                              : 'Applies this change to your plan and recalculates everything'
+                          }
+                        >
+                          {wasApplied ? (
+                            <>
+                              <Icon name="check" /> Applied
+                            </>
+                          ) : (
+                            'Apply to my plan'
+                          )}
+                        </button>
+                      )}
+                    </div>
+
+                    {isOpen && (
+                      <div className="stack-sm" id={detailId}>
+                        <div>
+                          <h3 className="stat-label mb-2">Steps</h3>
+                          <ol className="action-steps">
+                            {action.steps.map((step, i) => (
+                              <li key={i}>{step}</li>
+                            ))}
+                          </ol>
+                        </div>
+                        <AssumptionList assumptions={action.assumptions} title="What this calculation assumed" />
+                      </div>
                     )}
                   </div>
-
-                  {isOpen && (
-                    <div className="stack-sm">
-                      <div>
-                        <div className="stat-label" style={{ marginBottom: 7 }}>
-                          Steps
-                        </div>
-                        <ol className="action-steps">
-                          {action.steps.map((step, i) => (
-                            <li key={i}>{step}</li>
-                          ))}
-                        </ol>
-                      </div>
-                      <AssumptionList assumptions={action.assumptions} title="What this calculation assumed" />
-                    </div>
-                  )}
-                </div>
-              </article>
+                </article>
+              </li>
             );
           })}
-        </div>
+        </ol>
       )}
 
       <Card title="How actions are ranked" subtitle="The ordering is a rule, not a model output">
