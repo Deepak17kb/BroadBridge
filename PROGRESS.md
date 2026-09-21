@@ -1258,25 +1258,43 @@ set `cursor`. Nothing else contributed: neither `<Bar>` sets `activeBar` or a
 hover style, and no stylesheet touches `.recharts-tooltip-cursor` or
 `.recharts-rectangle`, so no CSS override was needed.
 
+**First pass, then replaced.** The first fix swapped the block for a faint
+`rgba(255, 255, 255, 0.04)` tint (a `--chart-cursor` token). On review the ask
+was stricter - no highlight, colour or background on hover at all, only the
+tooltip card - and the tint still lightened the column by up to 9 colour
+levels, which also made the bars read as changing colour beside it. The tint
+and its token are gone.
+
 Files touched:
-- `packages/web/src/components/charts/Charts.tsx` — `cursor={{ fill: 'var(--chart-cursor)' }}`
-  on the chart's `<Tooltip>`. Nothing else in the chart changed.
-- `packages/web/src/styles.css` — new `--chart-cursor` token.
+- `packages/web/src/components/charts/Charts.tsx` — `cursor={false}` on the
+  chart's `<Tooltip>`. Nothing else in the chart changed.
+- (`packages/web/src/styles.css` gained and then lost the `--chart-cursor`
+  token; its net change is nothing.)
 
 Decisions I made without asking:
-- **A theme token, not a literal.** Dark (the default) is exactly the requested
-  `rgba(255, 255, 255, 0.04)`; the light theme gets `rgba(16, 24, 40, 0.04)`,
-  because a white tint on a white card would vanish rather than read as subtle.
+- **No `.recharts-tooltip-cursor { display: none }` rule.** The brief asked for
+  it only in place of an existing `.recharts-tooltip-cursor` rule, and there
+  never was one. With `cursor={false}` Recharts renders no cursor element at
+  all, and a global rule would also hide the hover guide line in the other
+  charts (the Monte Carlo fans).
+- **Nothing to remove from the bars.** Neither `<Bar>` has `activeBar` (the
+  Recharts default is `false`), mouse handlers or a hover style, and no CSS
+  targets `.recharts-rectangle`, `.recharts-bar-rectangle` or
+  `.recharts-active-shape`.
 - **Only this chart.** The Scenario Lab's `OutcomeHistogram` and
   `ScenarioComparison` are also `BarChart`s with the default `#ccc` cursor;
-  they are the same one-line fix with the same token, not done here.
+  the same one-line fix, not done here.
 
-Verified in headless Chrome (Aarav plus an added "New goal"): hovering Emergency
-Fund, Japan Trip, New goal and Retirement, the cursor's fill is
-`var(--chart-cursor)` -> `rgba(255, 255, 255, 0.04)` in dark and
-`rgba(16, 24, 40, 0.04)` in light - never `#ccc` - each tooltip card still
-renders, the bar fills are unchanged (`var(--border-strong)`, and the status
-colour per cell), and there were no page errors.
+Verified in headless Chrome (Aarav plus an added "New goal"), by decoding real
+screenshots taken before and during a hover over each of Emergency Fund, Japan
+Trip, New goal and Retirement - 48 background points across the column plus
+five points down each bar, skipping whatever the tooltip card covers:
+- with the tint: a cursor element on every hover, background up by 9 levels;
+- after: **no cursor element**, bar fill / opacity / filter identical, bars 0-1
+  levels, and every background point more than 26px from the card unchanged.
+  The 1-5 level changes within 26px are the card's own `box-shadow`
+  (`0 24px 60px -24px`), part of the tooltip card, which stays as it was.
+Same result in the light theme; the tooltip card shows all four rows.
 
 Tests: no test can see a hover cursor under server rendering, so none added.
 ```
