@@ -385,6 +385,11 @@ button {
 .grid-sidebar-left {
   grid-template-columns: minmax(0, 1fr) minmax(0, 1.65fr);
 }
+/* A grid item sized to its own content rather than stretched to the row -
+   for a card sitting beside a much taller column. */
+.self-start {
+  align-self: start;
+}
 
 .stack {
   display: flex;

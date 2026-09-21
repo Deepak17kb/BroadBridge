@@ -178,6 +178,13 @@ test('entered ages continue only when they make sense', () => {
   assert.deepEqual(checkAges({ age: 30, retirementAge: 120 }).problems, ['Retirement age can be at most 100.']);
 });
 
+test('the goal list card sizes to its goals instead of stretching to the column beside it', () => {
+  // Grid items stretch to the row by default, which left the card as tall as
+  // the detail column - over a thousand pixels of empty card below three goals.
+  const html = render(structuredClone(PERSONAS[0]!.profile), Goals);
+  assert.match(html, /<section class="card\s+self-start"><header class="card-head"><div><h3 class="card-title">Your goals<\/h3>/);
+});
+
 test('the % funded axis is 0-100% in 25% steps and stretches to fit an over-funded goal', () => {
   assert.deepEqual(fundedAxis(69), { top: 100, ticks: [0, 25, 50, 75, 100] });
   assert.deepEqual(fundedAxis(0), { top: 100, ticks: [0, 25, 50, 75, 100] });

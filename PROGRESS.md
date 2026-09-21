@@ -1366,3 +1366,50 @@ $ npm run typecheck -> exit 0    $ npm run lint -> exit 0
 `fundedPercent` is uncapped above 100%, 0 with no target, and equal to
 `fundedRatio` below 100%; the axis helper gives 0-100% in 25% steps, the next
 25% above an over-funded goal, and at most nine labels from 0% far above it.
+
+## "Your goals" card stretched to the detail column's height  [done]
+
+**The report:** on the Goals page the "Your goals" card was as tall as the
+column beside it, leaving a large empty area below the last goal.
+
+**Cause.** The card and the detail column share `.grid.grid-sidebar-left`, a
+CSS grid, and grid items default to `align-self: stretch`. Nothing else forced
+the height: `.card` sets no height, min-height or flex, and the list wrapper
+(`.stack-sm`) neither. Below 1180px the grid is one column, so it only
+happened on desktop.
+
+Files touched:
+- `packages/web/src/styles.css` — a `.self-start { align-self: start; }` utility
+  beside the grid rules (the app is plain CSS, not Tailwind).
+- `packages/web/src/pages/Goals.tsx` — `className="self-start"` on that card.
+- `packages/web/test/render.test.tsx` — pins the class on the card.
+
+Decisions I made without asking:
+- **On the card, not `align-items` on the grid**, so the detail column's layout
+  is untouched, as asked.
+- **Not sticky.** The brief offered it only if it changed nothing else. The top
+  bar is already `position: sticky`, so a sticky card needs an offset below it,
+  and in the one-column layout it would ride over the cards beneath it. Easy to
+  add for desktop only if wanted.
+
+Measured in headless Chrome, card height against the space below its last goal
+(padding and border excluded):
+```
+                  before                       after
+desktop, 3 goals  1675px, 1320px empty         356px, 0px empty
+desktop, 10 goals 1717px,  731px empty         986px, 0px empty
+desktop, 1 goal   1717px, 1541px empty         176px, 0px empty
+1024px / 390px    356px, 0px (one column)      356px, 0px, 16px to the next card
+```
+The detail column stays 1675px; background, border, radius and padding are
+identical; no horizontal overflow or page errors at any width. Toggling only the
+class on one loaded page: 356px with it, 1675px without on desktop, 356px either
+way on narrow screens.
+
+Tests added (1) - real output:
+```
+ℹ tests 106   ℹ pass 106   ℹ fail 0      (shared)
+ℹ tests 91    ℹ pass 91    ℹ fail 0      (server)
+ℹ tests 39    ℹ pass 39    ℹ fail 0      (web - was 38)
+$ npm run typecheck -> exit 0    $ npm run lint -> exit 0
+```

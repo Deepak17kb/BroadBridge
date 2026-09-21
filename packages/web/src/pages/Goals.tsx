@@ -231,8 +231,9 @@ export function Goals() {
           </Card>
 
           <div className="grid grid-sidebar-left">
-            {/* Goal list. */}
-            <Card title="Your goals" subtitle="Select one to model it">
+            {/* Goal list. `self-start` keeps it as tall as its goals; the grid
+                would otherwise stretch it to the detail column beside it. */}
+            <Card title="Your goals" subtitle="Select one to model it" className="self-start">
               <div className="stack-sm">
                 {snapshot.goalProjections.map((p) => {
                   const goal = profile.goals.find((g) => g.id === p.goalId);
