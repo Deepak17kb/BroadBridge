@@ -241,7 +241,9 @@ export function Scenarios() {
             <Slider
               label="Retire earlier or later"
               value={levers.retirementAgeDelta ?? 0}
-              min={-10}
+              // Never at or before today: -10 let a 52-year-old "retire at 50",
+              // which the engine can only model as retiring now.
+              min={-Math.min(10, Math.max(0, profile.retirementAge - profile.age - 1))}
               max={10}
               step={1}
               onChange={(v) => set('retirementAgeDelta', v || undefined)}

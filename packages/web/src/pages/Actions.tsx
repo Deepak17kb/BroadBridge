@@ -1,6 +1,7 @@
 import { useMemo, useState } from 'react';
 import {
   applyActionMutation,
+  isApplicable,
   formatCompact,
   type ActionCategory,
   type NextBestAction,
@@ -52,10 +53,6 @@ export function Actions() {
   );
   const visible = filter === 'all' ? snapshot.actions : snapshot.actions.filter((a) => a.category === filter);
 
-  const totalCurrencyImpact = snapshot.actions
-    .filter((a) => a.impact.unit === 'currency')
-    .reduce((acc, a) => acc + a.impact.value, 0);
-
   /**
    * Applies an action's mutation to the profile.
    *
@@ -92,11 +89,21 @@ export function Actions() {
         <Card>
           <Stat label="Actions identified" value={snapshot.actions.length} meta="from 12 rule checks" />
         </Card>
+        {/*
+          This card summed every money-denominated impact into one "upside":
+          a year's interest, a month's balance growth, a life-cover sum
+          assured and a thirty-year retirement shortfall, added together. The
+          total had no meaning, and the retirement *gap* - a problem, not a
+          gain - dominated it. What can honestly be counted is how many of
+          these the platform can carry out for you; what they are worth
+          together is the dashboard's impact figure, which is computed
+          without double counting.
+        */}
         <Card>
           <Stat
-            label="Quantified upside"
-            value={formatCompact(totalCurrencyImpact, currency)}
-            meta="sum of the money-denominated impacts"
+            label="One-click actions"
+            value={snapshot.actions.filter(isApplicable).length}
+            meta="the platform can apply these to your plan for you"
             tone="positive"
           />
         </Card>

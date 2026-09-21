@@ -702,14 +702,22 @@ export function Onboarding() {
                     />
                     <div className="field">
                       <label htmlFor={`goal-year-${g.id}`}>Target year</label>
-                      <input
+                      {/* Only a whole year in range reaches the draft: typing
+                          2031 used to store 2, 20 and 203 on the way, and a
+                          year left in the past failed the final save with a
+                          bare "Request body failed validation". */}
+                      <NumberInput
                         id={`goal-year-${g.id}`}
                         className="input num"
-                        type="number"
                         min={new Date().getUTCFullYear()}
                         max={2120}
                         value={g.targetYear}
-                        onChange={(e) => update((d) => void (d.goals[i]!.targetYear = Number(e.target.value) || 2040))}
+                        onChange={(v) => {
+                          const thisYear = new Date().getUTCFullYear();
+                          if (Number.isInteger(v) && v >= thisYear && v <= 2120) {
+                            update((d) => void (d.goals[i]!.targetYear = v));
+                          }
+                        }}
                       />
                     </div>
                     <MoneyInput

@@ -9,7 +9,7 @@ import {
   type VerificationCheck,
 } from '@wealth/shared';
 import { api, streamAgent, type AgentCapabilities } from '../lib/api';
-import { useLoadedProfile } from '../state/ProfileContext';
+import { useLoadedProfile, useProfile } from '../state/ProfileContext';
 import { AssumptionList, Badge, Callout, Card } from '../components/ui';
 import { MonteCarloFan, TableToggle } from '../components/charts/Charts';
 
@@ -62,6 +62,7 @@ const STARTERS = [
 
 export function Assistant() {
   const { profile, snapshot } = useLoadedProfile();
+  const { setProfile } = useProfile();
   const { currency } = profile;
 
   const [messages, setMessages] = useState<AgentMessage[]>([]);
@@ -84,6 +85,8 @@ export function Assistant() {
 
   const logRef = useRef<HTMLDivElement>(null);
   const cancelRef = useRef<(() => void) | null>(null);
+  /** Set when this turn ran `update_plan`, so the edited plan is fetched once it is saved. */
+  const planChangedRef = useRef(false);
 
   useEffect(() => {
     api.capabilities().then(setCapabilities).catch(() => setCapabilities(null));
@@ -193,6 +196,7 @@ export function Assistant() {
     setInput('');
     setStreaming(true);
     resetTurnState();
+    planChangedRef.current = false;
 
     cancelRef.current = streamAgent(profile.id, text, sessionId, {
       onEvent: (event: AgentEvent) => {
@@ -208,6 +212,7 @@ export function Assistant() {
             else setThoughts((t) => [...t, event.text]);
             break;
           case 'tool_call':
+            if (event.tool === 'update_plan') planChangedRef.current = true;
             setToolCalls((c) => [
               ...c,
               { id: event.id, tool: event.tool, label: event.label, input: event.input, status: 'running' },
@@ -248,6 +253,19 @@ export function Assistant() {
         // The turn is persisted server-side by now, so the list picks up a new
         // conversation or a bumped timestamp without a reload.
         refreshSessions();
+        /*
+         * The assistant can edit the plan, and the server saves that edit
+         * before `done`. The browser kept its own copy, so every page showed
+         * the old numbers - and the next edit anywhere PUT that stale copy
+         * back, silently undoing what the assistant had just changed.
+         */
+        if (planChangedRef.current) {
+          planChangedRef.current = false;
+          api
+            .getProfile(profile.id)
+            .then(setProfile)
+            .catch(() => setError('The plan was updated, but the new version could not be loaded - refresh to see it.'));
+        }
       },
       onError: (message) => {
         setError(message);

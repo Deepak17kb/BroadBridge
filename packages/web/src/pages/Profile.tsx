@@ -9,7 +9,7 @@ import {
 } from '@wealth/shared';
 import { api } from '../lib/api';
 import { useLoadedProfile, useProfile } from '../state/ProfileContext';
-import { Badge, Callout, Card, MoneyInput, ProgressBar, ScoreRing, Stat } from '../components/ui';
+import { Badge, Callout, Card, MoneyInput, NumberInput, ProgressBar, ScoreRing, Stat } from '../components/ui';
 import { ExpenseBars } from '../components/charts/Charts';
 
 /**
@@ -58,31 +58,45 @@ export function Profile() {
               </div>
               <div className="field">
                 <label htmlFor="p-age">Age</label>
-                <input
+                {/*
+                  Committed only when it is a whole age below the retirement
+                  age. Each keystroke used to save: typing 45 stored an age of
+                  4 on the way, and an age at or past retirement - which the
+                  retirement field below already refused - went through here,
+                  gave every projection a negative horizon, and made the server
+                  reject every save after it.
+                */}
+                <NumberInput
                   id="p-age"
                   className="input num"
-                  type="number"
                   min={16}
                   max={100}
                   value={profile.age}
-                  onChange={(e) => updateProfile((d) => void (d.age = Number(e.target.value) || d.age))}
+                  onChange={(next) =>
+                    updateProfile((d) => {
+                      if (Number.isInteger(next) && next >= 16 && next < d.retirementAge) d.age = next;
+                    })
+                  }
                 />
+                <div className="field-hint">Must be below your retirement age</div>
               </div>
               <div className="field">
                 <label htmlFor="p-retire">Retirement age</label>
-                <input
+                <NumberInput
                   id="p-retire"
                   className="input num"
-                  type="number"
                   min={profile.age + 1}
                   max={100}
                   value={profile.retirementAge}
-                  onChange={(e) =>
+                  onChange={(next) =>
                     updateProfile((d) => {
-                      const next = Number(e.target.value);
                       // Guarded here as well as server-side: an inverted pair
                       // would produce a negative horizon everywhere downstream.
-                      if (next > d.age && next <= 100) d.retirementAge = next;
+                      // The field keeps the partial text, so typing "6" on the
+                      // way to 62 no longer snaps back to the old value.
+                      if (Number.isInteger(next) && next > d.age && next >= 30 && next <= 100) {
+                        d.retirementAge = next;
+                      }
                     })
                   }
                 />
@@ -92,14 +106,15 @@ export function Profile() {
               </div>
               <div className="field">
                 <label htmlFor="p-dependents">Dependents</label>
-                <input
+                <NumberInput
                   id="p-dependents"
                   className="input num"
-                  type="number"
                   min={0}
                   max={12}
                   value={profile.dependents}
-                  onChange={(e) => updateProfile((d) => void (d.dependents = Number(e.target.value) || 0))}
+                  onChange={(next) =>
+                    updateProfile((d) => void (d.dependents = Math.min(12, Math.max(0, Math.round(next)))))
+                  }
                 />
               </div>
               <div className="field">
@@ -121,16 +136,15 @@ export function Profile() {
               </div>
               <div className="field">
                 <label htmlFor="p-growth">Annual pay rise (%)</label>
-                <input
+                <NumberInput
                   id="p-growth"
                   className="input num"
-                  type="number"
                   min={0}
                   max={50}
-                  value={Math.round(profile.cashflow.annualIncomeGrowthPct * 100)}
-                  onChange={(e) =>
+                  value={Math.round(profile.cashflow.annualIncomeGrowthPct * 10000) / 100}
+                  onChange={(next) =>
                     updateProfile(
-                      (d) => void (d.cashflow.annualIncomeGrowthPct = (Number(e.target.value) || 0) / 100),
+                      (d) => void (d.cashflow.annualIncomeGrowthPct = Math.min(50, Math.max(0, next)) / 100),
                     )
                   }
                 />

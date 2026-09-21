@@ -8,7 +8,7 @@
     "build": "vite build",
     "preview": "vite preview",
     "typecheck": "tsc --noEmit -p .",
-    "test": "node --import tsx --test test/render.test.tsx"
+    "test": "node --import tsx --test test/render.test.tsx test/regressions.test.tsx"
   },
   "dependencies": {
     "@wealth/shared": "*",

@@ -1099,3 +1099,142 @@ Anything I deliberately left out:
   wants a decision about what the card shows meanwhile - not in this report.
 - **Profile page ages** stay pre-filled, correctly: that page edits values the
   user has already given.
+
+## Fix — full-platform bug sweep  [done]
+
+**The request:** "test for bug in every functionality and fix it."
+
+Method: read every engine module, route, agent component and page; probed the
+engine with scripts against the three personas; drove the live API
+(deterministic mode, no credentials) with bad and edge-case payloads; drove the
+web app in headless Chrome (typing into fields, applying actions, the
+assistant). Every bug below was reproduced before it was fixed, and each fix has
+a regression test.
+
+### Engine (`@wealth/shared`)
+
+| Bug | Effect | Fix |
+|---|---|---|
+| `runScenario` shifted the retirement age on the scenario profile **and** passed `retirementAgeDelta` to `assessRetirement` | "Retire 5 years earlier" was modelled as ten (Meera: 10 simulated years instead of 15) | pass the shifted profile only |
+| Extra saving and lump sums went to the goals **and** in full to retirement; freed spending went to the goals and again into habitual saving | "Save 5,000 more" invested 10,000 | retirement gets only the share routed to retirement-kind goals (all of it with no goals); new optional `surplusCommitted` on `assessRetirement` |
+| A crash lever with no `shockYear` | label and narration said "yr 1"; every projection skipped the shock | resolved to year 1 once, used everywhere |
+| `inflationPct: 0` treated as unset (truthiness) | labelled "0.0% inflation", computed at 6% | `!== undefined` |
+| Custom allocation lever re-priced goals with the risk-bucket mix | the emergency fund jumped from a 4.9% to a 7.6% return even when the "custom" mix was the recommended one | goals always use `returnForGoal` |
+| Monte Carlo ignored the career break | success probability unchanged by a 36-month break | new optional `skipMonths` input, passed by `runScenario` |
+| Monte Carlo applied the shock one month late | a crash at the horizon - the worst case - never landed | applied when month `shockYear*12` completes, as `accumulate` does |
+| Monte Carlo rounded the horizon up to whole years | a goal 1.3 years out simulated for 2, overstating near-term success | simulated in whole months; final band at the real horizon |
+| `accumulate` dropped the rest of a career break after a shock | a 36-month break with a year-1 shock credited 24 extra contributions | remaining skip months carried past the shock |
+| Impact metrics paired the plan's return with the *current* holdings' volatility | a rebalance moved the median by tens of lakhs with no return change, contradicting the printed explanation | volatility of the same (recommended) mix; explanation rewritten to the real reason a figure can be negative |
+| Applying a rebalance restated each class through its last holding | Aarav's RSU stayed at 42% after "Trim the RSU and realign"; one holding's cost basis stood for the class | multi-holding or single-stock classes become one fund position; average-cost basis |
+| Applying "put idle cash to work" rebalanced the holdings and left the cash | Rohan's 4.06 L stayed idle and the action reappeared | new optional `fundFromCash` on `set_allocation` |
+| Snowball/avalanche paid EMI + extra against the full balance | the surplus was thrown away in each debt's final month | payment capped at what is due; unneeded EMI rolls on |
+| Retirement drawdown counted from a retirement age in the past | depletion age before today | starts at `max(retirementAge, age)` |
+| "Or work N more years" was `min(5, ceil(10 x shortfall))` | Meera told 4 (engine: 10), Aarav 5 (five years only reaches 54%), Rohan 2 (needs 3) | searched with `assessRetirement`; grounded in the evidence |
+| `formatYears` / `formatCompact` unit boundaries | "1y 12m", "₹100.0k", "₹100.00 L", "-₹0" | round first, then pick the unit |
+
+### Server
+
+| Bug | Effect | Fix |
+|---|---|---|
+| `PATCH` used `deepPartial()`, which also makes array-item fields optional | `{"goals":[{"id":"x"}]}` was stored and every later snapshot 500'd - the profile was bricked | merged profile validated with the full schema before storing |
+| `assumptionOverrides: z.record(z.string(), z.any())` | `{"inflationPct":"abc"}` stored; projections came back `null`; a zero withdrawal rate divides by zero | bounded per-field schema |
+| Allocation lever was `z.record(z.string(), ...)` | `{"stocks":1}` or all-zero weights priced the plan at 0% | six asset classes, at least one positive (`lib/levers.ts`) |
+| Agent `simulate_scenario` / `compare_scenarios` skipped lever validation | a model writing `-35` for `-0.35` produced a negative corpus | same schema as the route; problems reported back to the model |
+| `update_plan` wrote whatever it was given, and the route persists without validating | a retirement age of 62.5, a goal due in the past or an unknown kind made every later browser save fail | held to the profile schema's rules; projection looked up by id |
+| `loadSession` reused any session id | one profile's turn was appended to another profile's history (and replayed it) | a foreign id starts a fresh session under a new id |
+| `DynamoStore.getSession` used `Limit: 1` with a `FilterExpression` | DynamoDB applies Limit before the filter: continuing a chat overwrote its history, reopening 404'd, deleting did nothing | pages walked until found, newest first |
+| Deterministic parser: units without word boundaries | "2 kids" read as 2,000; "2 credit cards" as 2 crore; "a 2008 crash ... bonus of 3 lakh" as a 2,008-crore lump sum | `\b` on every unit |
+| Parser missed "crashes"/"crashed", read "2 year break" as 2 months, dropped "invest 2 lakh", ignored "next year" | answers about the wrong scenario (the +5,000/month default) | word forms, years to months, lump sums not capped by income, shock timing |
+| Synthesiser templated over tool errors | "undefined is not on track ... ₹NaN"; a debt question from a debt-free profile threw and the user got "could not complete that request" | error payloads fall back to the tool's summary; debt-free guard |
+| Goal answers put the *retirement* simulation straight after the goal | "8% reach the target" read as the home goal's odds | labelled as the retirement plan unless the goal is retirement |
+| "Avalanche saves X" printed with `Math.abs` | claimed a saving when snowball was cheaper or equal | wording follows the sign |
+| Trace labels came from a drifted hand-kept list | two tools showed as "Running estimate action impact" | read from the tool definitions |
+| `describeLlmError` forwarded any error's message | the client received "Cannot read properties of undefined (reading 'unpayable')" | programming errors get a plain sentence; the raw cause stays in the log |
+
+### Web
+
+| Bug | Effect | Fix |
+|---|---|---|
+| The assistant's plan edits never reached the browser | pages showed old numbers, and the next edit anywhere PUT the stale copy back, **silently undoing the agent's change** | reload the profile after a turn that ran `update_plan` |
+| Goal target year saved on every keystroke | typing 2031 stored 2, 20, 203; a past year fails validation and blocks every later save | `NumberInput`, committed only as a whole year in range (Goals and Onboarding - also closes the `\|\| 2040` snap-back left open in the previous entry) |
+| Profile age accepted an age at/after retirement, and partial ages | negative horizon everywhere; the server rejected every save | commit only a whole age below retirement |
+| Goal inflation, fund fee and loan rate fields re-formatted with `toFixed` per keystroke | "8.5" typed became 8.0, 8.05, 8.1 (the bug `NumberInput` was written for) | `NumberInput` |
+| Goal simulation used the risk-bucket mix for every goal | an emergency fund priced on cash was simulated as equity | new `allocationForGoal` export, shared with `returnForGoal` |
+| "Quantified upside" summed yearly interest, monthly flows, life-cover sums and a 30-year retirement *gap* | a meaningless headline dominated by a shortfall | replaced by the count of one-click actions |
+| "Retire earlier" slider went to -10 regardless of age | a 52-year-old could "retire at 50" | min keeps retirement after today |
+
+Files touched:
+- shared: `finance/math.ts`, `finance/montecarlo.ts`, `finance/cashflow.ts`,
+  `finance/engine.ts`, `finance/actions.ts`, `finance/mutations.ts`,
+  `impact.ts`, `format.ts`, `types.ts`, `package.json` (test script),
+  `test/regressions.test.ts` (new)
+- server: `routes/profiles.ts`, `routes/planning.ts`, `routes/agent.ts`,
+  `lib/levers.ts` (new), `agent/tools.ts`, `agent/intent.ts`,
+  `agent/synthesis.ts`, `agent/orchestrator.ts`, `agent/llm.ts`,
+  `store/index.ts`, `package.json` (test script), `test/regressions.test.ts` (new)
+- web: `pages/Assistant.tsx`, `pages/Goals.tsx`, `pages/Profile.tsx`,
+  `pages/Portfolio.tsx`, `pages/Onboarding.tsx`, `pages/Scenarios.tsx`,
+  `pages/Actions.tsx`, `package.json` (test script),
+  `test/regressions.test.tsx` (new)
+- `docs/API.md` - lever rules, PATCH validation, override bounds.
+
+Decisions I made without asking:
+- **Every `@wealth/shared` API change is additive**: `allocationForGoal`,
+  optional `MonteCarloInput.skipMonths`, optional
+  `RetirementInput.surplusCommitted`, optional `fundFromCash` on the
+  `set_allocation` mutation. No existing signature changed.
+- **No existing test was changed or weakened.** "Cutting expenses frees cash"
+  still holds: the scenario's displayed surplus rises; only the retirement
+  projection stops counting that cash a second time.
+- **A crash with no year means year 1** - what the label and narration already said.
+- **A custom allocation lever applies to the retirement portfolio only**; goal
+  money stays in its horizon's mix, exactly as in the baseline.
+- **Rebalancing a class with several holdings, or a single stock, produces one
+  fund position** at the class's blended fee; a lone fund or deposit is
+  restated in place. Cost basis is average-cost (a sale keeps the cost of what
+  remains, a purchase adds at market).
+- **Unknown top-level override fields are dropped, not rejected**, so an older
+  client cannot lock a profile out of saving; wrong types and ranges are 400s.
+- **The "Quantified upside" card became "One-click actions"** rather than being
+  relabelled: no label makes that sum meaningful. The dashboard's impact
+  figure is the honest "what is it worth".
+- **Not committed.** The working tree already held ~2,300 lines of earlier,
+  uncommitted work across the same files; a commit now would bundle it with
+  these fixes. Left for you to split or commit.
+
+Tests added (38) - real output (`npm test`):
+```
+ℹ tests 105   ℹ pass 105   ℹ fail 0      (shared - was 83)
+ℹ tests 91    ℹ pass 91    ℹ fail 0      (server - was 78)
+ℹ tests 37    ℹ pass 37    ℹ fail 0      (web - was 34)
+$ npm run typecheck -> exit 0    $ npm run lint -> exit 0 (0 warnings)
+$ npm run synth -> build, then "Successfully synthesized"
+```
+233 total, up from 195. Headless Chrome (the system Chrome, driven by
+playwright-core installed in a scratch directory, not the repo): every page
+free of NaN/undefined and console errors; a year typed slowly is stored as 2031
+with no rejected saves; "8.5" stays 8.5; age 70 is not committed; the RSU action
+disappears after Apply; Rohan's idle 4.06 L moves into the portfolio; the
+assistant's contribution change shows on Goals without a reload and survives a
+later edit.
+
+Anything I deliberately left out:
+- **Provider paths** (Anthropic, Bedrock, Groq) were not run live - that needs
+  credentials and spends money. Their unit tests pass.
+- **`DynamoStore.getSession` is now correct but walks the index**; a GSI keyed
+  on `sessionId` would make it one read. That is an infra change plus a deploy.
+- **The engine's three private compact formatters** (`engine.ts` `compact`,
+  `actions.ts` `fmt`, `goals.ts` `formatPlain`) still have the unit-boundary
+  rounding `formatCompact` had ("100.0k"). Cosmetic, in action and assumption
+  text only.
+- **Hardcoded thresholds** - the 15% "high-cost debt" line (risk, wellness) and
+  the tax rule's slabs - are not in `assumptions.ts` (constraint 5). A
+  tunables task, not a bug fix.
+- **`set_emergency_fund` sets liquid savings to the target** without taking the
+  money from anywhere. A modelling choice worth revisiting, not a defect.
+- **The profile schema's `targetYear` minimum is fixed at server start**, and a
+  stored goal whose year has passed fails every save until it is edited.
+- **Pinned scenario comparisons** can be scored against a not-yet-saved profile
+  (600 ms debounce); the Scenario Lab edits nothing, so it does not arise today.
+- **A pending debounced save is lost on a reload within 600 ms**, and the
+  Actions page's "Applied" state is keyed by action id for the life of the page.

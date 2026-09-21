@@ -7,7 +7,7 @@ import {
   type AssetClass,
 } from '@wealth/shared';
 import { useLoadedProfile, useProfile } from '../state/ProfileContext';
-import { AssumptionList, Badge, Callout, Card, Empty, MoneyInput, Slider, Stat } from '../components/ui';
+import { AssumptionList, Badge, Callout, Card, Empty, MoneyInput, NumberInput, Slider, Stat } from '../components/ui';
 import { RiskLadder, useRiskLadder } from '../components/RiskLadder';
 import { AllocationBar, AllocationLegend, DriftChart } from '../components/charts/Charts';
 
@@ -370,19 +370,21 @@ export function Portfolio() {
                           {formatCompact(Math.abs(gain), currency)}
                         </td>
                         <td className="right">
-                          <input
+                          {/* NumberInput, not toFixed(2) on every keystroke, which
+                              rewrote a half-typed "0.5" as "0.50" and then 0.505. */}
+                          <NumberInput
+                            key={`fee-${h.id}`}
                             className="input num"
-                            type="number"
                             style={{ width: 74 }}
                             min={0}
-                            max={5}
+                            max={10}
                             step={0.05}
                             aria-label="Expense ratio percent"
-                            value={((h.expenseRatioPct ?? 0) * 100).toFixed(2)}
-                            onChange={(e) =>
+                            value={Math.round((h.expenseRatioPct ?? 0) * 10000) / 100}
+                            onChange={(v) =>
                               updateProfile(
                                 (d) =>
-                                  void (d.holdings[i]!.expenseRatioPct = (Number(e.target.value) || 0) / 100),
+                                  void (d.holdings[i]!.expenseRatioPct = Math.min(10, Math.max(0, v)) / 100),
                               )
                             }
                           />
@@ -524,20 +526,19 @@ export function Portfolio() {
                           />
                         </td>
                         <td className="right">
-                          <input
+                          <NumberInput
+                            key={`rate-${l.id}`}
                             className="input num"
-                            type="number"
                             style={{ width: 78 }}
                             min={0}
                             max={100}
                             step={0.25}
                             aria-label="Interest rate percent"
-                            value={(l.interestRatePct * 100).toFixed(2)}
-                            onChange={(e) =>
+                            value={Math.round(l.interestRatePct * 10000) / 100}
+                            onChange={(v) =>
                               updateProfile(
                                 (d) =>
-                                  void (d.liabilities[i]!.interestRatePct =
-                                    (Number(e.target.value) || 0) / 100),
+                                  void (d.liabilities[i]!.interestRatePct = Math.min(100, Math.max(0, v)) / 100),
                               )
                             }
                           />

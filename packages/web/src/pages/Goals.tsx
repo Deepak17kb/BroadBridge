@@ -1,5 +1,6 @@
 import { useMemo, useState } from 'react';
 import {
+  allocationForGoal,
   formatCompact,
   formatPercent,
   projectGoal,
@@ -8,14 +9,24 @@ import {
   runMonteCarlo,
   portfolioExpectedReturn,
   portfolioVolatility,
-  recommendAllocation,
   yearsToGoal,
   applyActionMutation,
   optimiseGoalFunding,
   type Goal,
 } from '@wealth/shared';
 import { useLoadedProfile, useProfile } from '../state/ProfileContext';
-import { AssumptionList, Badge, Callout, Card, Empty, MoneyInput, ProgressBar, Slider, Stat } from '../components/ui';
+import {
+  AssumptionList,
+  Badge,
+  Callout,
+  Card,
+  Empty,
+  MoneyInput,
+  NumberInput,
+  ProgressBar,
+  Slider,
+  Stat,
+} from '../components/ui';
 import { GoalFundingChart, MonteCarloFan, TableToggle } from '../components/charts/Charts';
 import { SurplusSplit } from '../components/SurplusSplit';
 
@@ -28,10 +39,16 @@ import { SurplusSplit } from '../components/SurplusSplit';
  * exploring what a change would do should not have their plan quietly rewritten
  * underneath them. Committing is a separate, explicit button.
  */
+/** A fraction as a percentage for an input, without float noise like 7.000000000000001. */
+function asPercent(fraction: number): number {
+  return Math.round(fraction * 10000) / 100;
+}
+
 export function Goals() {
   const { profile, snapshot } = useLoadedProfile();
   const { updateProfile } = useProfile();
   const { currency } = profile;
+  const thisYear = new Date().getUTCFullYear();
 
   const [selectedId, setSelectedId] = useState<string | null>(profile.goals[0]?.id ?? null);
   const [splitApplied, setSplitApplied] = useState(false);
@@ -76,22 +93,27 @@ export function Goals() {
     });
   }, [selected, profile, assumptions, testExtra, testLump]);
 
-  /** The goal's own horizon drives its allocation, so its simulation uses that mix. */
+  /**
+   * The goal's own horizon drives its allocation, so its simulation uses that
+   * mix - the same one `returnForGoal` prices the projection on. This used the
+   * risk bucket's mix for every goal, so an emergency fund projected at a
+   * cash return was simulated as a mostly-equity book, and it rounded the
+   * horizon up to whole years, simulating a goal 1.3 years out for two.
+   */
   const simulation = useMemo(() => {
     if (!selected || !projection) return null;
-    const years = Math.max(1, Math.ceil(projection.yearsToGoal));
-    const allocation = recommendAllocation(snapshot.risk.bucket, projection.yearsToGoal);
+    const allocation = allocationForGoal(selected, profile);
     return runMonteCarlo({
       startingCorpus: selected.currentSaved + testLump,
       monthlyContribution: selected.monthlyContribution + testExtra,
       contributionStepUpPct: selected.contributionStepUpPct,
-      years,
+      years: projection.yearsToGoal,
       expectedReturnPct: portfolioExpectedReturn(allocation, assumptions),
       volatilityPct: portfolioVolatility(allocation, assumptions),
       target: projection.inflatedTarget,
       paths: 1500,
     });
-  }, [selected, projection, snapshot.risk.bucket, assumptions, testExtra, testLump]);
+  }, [selected, projection, profile, assumptions, testExtra, testLump]);
 
   const onTrack = snapshot.goalProjections.filter((g) => g.onTrack).length;
   const monthlyCommitted = profile.goals.reduce((acc, g) => acc + g.monthlyContribution, 0);
@@ -438,16 +460,24 @@ export function Goals() {
                     />
                     <div className="field">
                       <label htmlFor="goal-year">Target year</label>
-                      <input
+                      {/*
+                        Only a whole year in range is committed. Every keystroke
+                        used to save: typing 2031 stored 2, 20 and 203 on the
+                        way, and a year in the past fails server validation,
+                        which then blocked every save until it was fixed.
+                      */}
+                      <NumberInput
+                        key={`year-${selected.id}`}
                         id="goal-year"
                         className="input num"
-                        type="number"
-                        min={new Date().getUTCFullYear()}
+                        min={thisYear}
                         max={2120}
                         value={selected.targetYear}
-                        onChange={(e) =>
-                          editSelected((g) => void (g.targetYear = Number(e.target.value) || g.targetYear))
-                        }
+                        onChange={(v) => {
+                          if (Number.isInteger(v) && v >= thisYear && v <= 2120) {
+                            editSelected((g) => void (g.targetYear = v));
+                          }
+                        }}
                       />
                       <div className="field-hint">
                         {yearsToGoal(selected.targetYear).toFixed(1)} years from today
@@ -469,17 +499,15 @@ export function Goals() {
                     />
                     <div className="field">
                       <label htmlFor="goal-stepup">Annual step-up (%)</label>
-                      <input
+                      <NumberInput
+                        key={`stepup-${selected.id}`}
                         id="goal-stepup"
                         className="input num"
-                        type="number"
                         min={0}
                         max={50}
-                        value={Math.round(selected.contributionStepUpPct * 100)}
-                        onChange={(e) =>
-                          editSelected(
-                            (g) => void (g.contributionStepUpPct = (Number(e.target.value) || 0) / 100),
-                          )
+                        value={asPercent(selected.contributionStepUpPct)}
+                        onChange={(v) =>
+                          editSelected((g) => void (g.contributionStepUpPct = Math.min(50, Math.max(0, v)) / 100))
                         }
                       />
                       <div className="field-hint">
@@ -503,18 +531,21 @@ export function Goals() {
                     </div>
                     <div className="field">
                       <label htmlFor="goal-inflation">Goal-specific inflation (%)</label>
-                      <input
+                      {/*
+                        A NumberInput, not a raw input formatted with toFixed(1):
+                        re-formatting after every keystroke turned "8.5" typed
+                        over "6.0" into 8.0, then 8.05, then 8.1.
+                      */}
+                      <NumberInput
+                        key={`inflation-${selected.id}`}
                         id="goal-inflation"
                         className="input num"
-                        type="number"
                         min={0}
                         max={30}
                         step={0.5}
-                        value={((selected.inflationOverridePct ?? assumptions.inflationPct) * 100).toFixed(1)}
-                        onChange={(e) =>
-                          editSelected(
-                            (g) => void (g.inflationOverridePct = (Number(e.target.value) || 0) / 100),
-                          )
+                        value={asPercent(selected.inflationOverridePct ?? assumptions.inflationPct)}
+                        onChange={(v) =>
+                          editSelected((g) => void (g.inflationOverridePct = Math.min(30, Math.max(0, v)) / 100))
                         }
                       />
                       <div className="field-hint">
