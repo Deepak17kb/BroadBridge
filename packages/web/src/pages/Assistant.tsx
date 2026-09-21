@@ -5,6 +5,7 @@ import {
   type AgentEvent,
   type AgentMessage,
   type AgentPlanStep,
+  type Currency,
   type VerificationCheck,
 } from '@wealth/shared';
 import { api, streamAgent, type AgentCapabilities } from '../lib/api';
@@ -21,6 +22,14 @@ import { MonteCarloFan, TableToggle } from '../components/charts/Charts';
  * something a user can audit. It is also the honest way to present an agent -
  * the work is real, so it can be shown.
  */
+
+/** A Record rather than a ternary chain, so a new provider cannot be forgotten. */
+const ENGINE_TEXT: Record<AgentCapabilities['engine'], string> = {
+  bedrock: 'Claude on Bedrock',
+  anthropic: 'Claude API',
+  groq: 'Groq',
+  deterministic: 'Deterministic engine',
+};
 
 /** One row of the conversation list, as `GET /api/agent/:id/sessions` returns it. */
 interface SessionSummary {
@@ -286,11 +295,7 @@ export function Assistant() {
                       : 'info'
                 }
               >
-                {capabilities.engine === 'bedrock'
-                  ? 'Claude on Bedrock'
-                  : capabilities.engine === 'anthropic'
-                    ? 'Claude API'
-                    : 'Deterministic engine'}
+                {ENGINE_TEXT[capabilities.engine]}
               </Badge>
               <div className="text-xs text-subtle" style={{ marginTop: 4 }}>
                 {capabilities.tools.length} tools · {capabilities.knowledgeBase.length} reference notes
@@ -304,9 +309,9 @@ export function Assistant() {
         <Callout tone="info">
           No model credentials are configured, so the assistant is planning and answering with its
           rule-based engine. It still classifies the question, runs the same tools and grounds every
-          figure — the wording is just less fluent than Claude's. Set{' '}
-          <code>ANTHROPIC_API_KEY</code>, or deploy to AWS where the Lambda role reaches Bedrock, to
-          switch it on.
+          figure — the wording is just less fluent than a model's. Set{' '}
+          <code>ANTHROPIC_API_KEY</code> or <code>GROQ_API_KEY</code>, or deploy to AWS where the
+          Lambda role reaches Bedrock, to switch it on.
         </Callout>
       )}
 
@@ -653,7 +658,7 @@ export function Assistant() {
 }
 
 /** One turn, plus any structured cards the agent attached to it. */
-function MessageBubble({ message, currency }: { message: AgentMessage; currency: 'INR' | 'USD' }) {
+function MessageBubble({ message, currency }: { message: AgentMessage; currency: Currency }) {
   if (message.role === 'user') {
     return (
       <div className="msg user">

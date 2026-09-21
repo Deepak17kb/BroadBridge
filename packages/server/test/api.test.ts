@@ -128,8 +128,9 @@ test('patching a profile recomputes the snapshot', async () => {
 
   assert.ok(snapshot.cashflow.emergencyFundMonths > before.cashflow.emergencyFundMonths);
   assert.ok(snapshot.netWorth.netWorth > before.netWorth.netWorth);
-  // A large idle cash pile should now be flagged.
-  assert.ok(snapshot.actions.some((a: { id: string }) => a.id === 'deploy-idle-cash'));
+  // A large idle cash pile should now be flagged. deploy-idle-cash and
+  // automate-surplus were merged into one deploy-surplus rule.
+  assert.ok(snapshot.actions.some((a: { id: string }) => a.id === 'deploy-surplus'));
 });
 
 test('invalid profile edits are rejected with field detail', async () => {
@@ -235,6 +236,53 @@ test('goal projection accepts test contributions', async () => {
 
   assert.ok(boosted.projectedCorpus > base.projectedCorpus);
   assert.ok(base.assumptions.length >= 4);
+});
+
+test('the goal optimiser divides the pool without inventing money', async () => {
+  const profile = await createProfile('meera');
+  const res = await api(`/api/plan/${profile.id}/optimise-goals`, {
+    method: 'POST',
+    body: JSON.stringify({}),
+  });
+  assert.equal(res.status, 200);
+  const body = await json(res);
+
+  const handedOut = body.allocations.reduce((a: number, x: any) => a + x.allocated, 0);
+  assert.ok(Math.abs(handedOut + body.unallocated - body.available) < 1, 'the pool balances');
+  assert.ok(
+    body.allocations.every((a: any) => a.allocated <= a.requiredMonthly + 0.5),
+    'no goal is given more than it needs',
+  );
+
+  // The point of the endpoint: it says what the goals that lose out lose.
+  assert.ok(body.starved.length > 0, 'Meera cannot fund everything');
+  for (const s of body.starved) {
+    assert.ok(s.unmetMonthly > 0);
+    assert.ok(s.yearsDelayIfUnfunded === null || s.yearsDelayIfUnfunded > 0);
+  }
+  assert.ok(body.rationale.length > 40);
+  assert.ok(body.assumptions.length > 0, 'the weights it used are declared');
+});
+
+test('a surplus override is validated and answers the what-if', async () => {
+  const profile = await createProfile('meera');
+  const res = await api(`/api/plan/${profile.id}/optimise-goals`, {
+    method: 'POST',
+    body: JSON.stringify({ surplusOverride: 400_000 }),
+  });
+  const body = await json(res);
+  assert.equal(body.available, 400_000);
+  assert.ok(
+    body.allocations.some((a: any) => a.onTrack),
+    'a much larger pool funds at least one goal outright',
+  );
+
+  const bad = await api(`/api/plan/${profile.id}/optimise-goals`, {
+    method: 'POST',
+    body: JSON.stringify({ surplusOverride: -1 }),
+  });
+  assert.equal(bad.status, 400, 'a negative override is rejected with field detail');
+  assert.ok((await json(bad)).details);
 });
 
 test('the allocation ladder is ordered by risk', async () => {

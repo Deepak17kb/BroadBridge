@@ -65,7 +65,9 @@ export const profileSchema = z.object({
   retirementAge: z.number().int().min(30).max(100),
   dependents: z.number().int().min(0).max(12),
   incomeStability: z.enum(['stable', 'variable', 'uncertain']),
-  currency: z.enum(['INR', 'USD']),
+  // INR-only platform. The field stays so the wire shape is explicit,
+  // and a literal makes a stray USD payload a 400 rather than a silent accept.
+  currency: z.literal('INR'),
   cashflow: z.object({
     monthlyNetIncome: z.number().min(0),
     otherMonthlyIncome: z.number().min(0),

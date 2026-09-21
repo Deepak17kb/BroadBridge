@@ -31,7 +31,7 @@ Liveness, plus which reasoning engine is active.
 }
 ```
 
-`engine` is `bedrock`, `anthropic` or `deterministic`. The UI surfaces this so it is never ambiguous which engine produced an answer.
+`engine` is `bedrock`, `anthropic`, `groq` or `deterministic`. The UI surfaces this so it is never ambiguous which engine produced an answer.
 
 ### `GET /api/ready`
 
@@ -174,7 +174,7 @@ What following the top-ranked actions is actually worth. Returns `before` and `a
 
 Two rules keep the figure honest, and both are visible in the response:
 
-- **Only actions the platform can carry out are counted.** Four of the fifteen rules carry a machine-applicable mutation; the rest need the user to buy a policy, refinance or open an account. Those arrive in `notModelled` rather than inside the headline.
+- **Only actions the platform can carry out are counted.** Four of the twelve rules carry a machine-applicable mutation; the rest need the user to buy a policy, refinance or open an account. Those arrive in `notModelled` rather than inside the headline.
 - **Only actions the user can fund are counted.** The `fund-goal-*` rules mutate a contribution by the whole monthly gap regardless of surplus. Counted naively that reported "retirement funded 41% → 459%" for a profile already running a deficit. An action that would push the surplus below zero is excluded, with the arithmetic in its `why`.
 
 Deterministic: the simulation is seeded, and the mutations use fixed ids, so the same plan always reports the same numbers. `top` is clamped to 1–10 and counts *applicable, affordable* actions, so the walk continues down the ranked list until it finds that many.

@@ -22,15 +22,20 @@ import {
 } from './portfolio.js';
 import { scoreRisk } from './risk.js';
 
+/**
+ * The house view, with the user's ledger overrides layered on top. Both are
+ * stated in INR - the platform has one currency, so nothing is restated.
+ */
 export function resolveAssumptions(profile: UserProfile): MarketAssumptions {
+  const base = DEFAULT_ASSUMPTIONS;
   const o = profile.assumptionOverrides;
-  if (!o) return DEFAULT_ASSUMPTIONS;
+  if (!o) return base;
   return {
-    ...DEFAULT_ASSUMPTIONS,
+    ...base,
     ...o,
-    expectedReturns: { ...DEFAULT_ASSUMPTIONS.expectedReturns, ...(o.expectedReturns ?? {}) },
-    volatility: { ...DEFAULT_ASSUMPTIONS.volatility, ...(o.volatility ?? {}) },
-    correlations: { ...DEFAULT_ASSUMPTIONS.correlations, ...(o.correlations ?? {}) },
+    expectedReturns: { ...base.expectedReturns, ...(o.expectedReturns ?? {}) },
+    volatility: { ...base.volatility, ...(o.volatility ?? {}) },
+    correlations: { ...base.correlations, ...(o.correlations ?? {}) },
   };
 }
 

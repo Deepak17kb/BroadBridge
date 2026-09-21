@@ -12,7 +12,8 @@ import { Portfolio } from '../src/pages/Portfolio';
 import { Assistant } from '../src/pages/Assistant';
 import { Assumptions } from '../src/pages/Assumptions';
 import { Profile } from '../src/pages/Profile';
-import { Onboarding } from '../src/pages/Onboarding';
+import { Onboarding, checkAges } from '../src/pages/Onboarding';
+import { MoneyInput, NumberInput, withoutLeadingZeros } from '../src/components/ui';
 
 /**
  * Smoke renders.
@@ -107,4 +108,71 @@ test('a debt-free profile does not break the portfolio page', () => {
   profile.liabilities = [];
   const html = render(profile, Portfolio);
   assert.ok(html.includes('Debt free'));
+});
+
+/* -------------------------------------------------------------------------- */
+/* Number fields                                                               */
+/* -------------------------------------------------------------------------- */
+
+/**
+ * A field holding 0 used to keep that 0 as text, so typing "85000" into it
+ * showed "085000": React leaves a number input alone when its text already
+ * parses to the controlled value. Zero is now a placeholder. What typing does
+ * to the field needs a DOM and was verified in the browser; these pin the parts
+ * that decide it.
+ */
+
+test('a zero number field is empty with a 0 placeholder, not the text 0', () => {
+  const zero = renderToString(<NumberInput value={0} onChange={() => undefined} />);
+  assert.match(zero, /value=""/);
+  assert.match(zero, /placeholder="0"/);
+
+  const set = renderToString(<NumberInput value={85000} onChange={() => undefined} />);
+  assert.match(set, /value="85000"/);
+});
+
+test('a money field holding zero shows the placeholder, not the text 0', () => {
+  const html = renderToString(<MoneyInput value={0} currency="INR" onChange={() => undefined} />);
+  assert.match(html, /value=""/);
+  assert.match(html, /placeholder="0"/);
+  assert.ok(!/value="0"/.test(html), 'a stored zero must not render as typed text');
+});
+
+test('leading zeros disappear as they are typed, the zero in a decimal does not', () => {
+  // The reported case: a field showing 0, with 85000 typed after it.
+  assert.equal(withoutLeadingZeros('085000'), '85000');
+  assert.equal(withoutLeadingZeros('02'), '2');
+  assert.equal(withoutLeadingZeros('0007'), '7');
+  assert.equal(withoutLeadingZeros('-05'), '-5');
+  // A zero the user means stays.
+  assert.equal(withoutLeadingZeros('0'), '0');
+  assert.equal(withoutLeadingZeros('0.5'), '0.5');
+  assert.equal(withoutLeadingZeros('10'), '10');
+  assert.equal(withoutLeadingZeros('8.05'), '8.05');
+  assert.equal(withoutLeadingZeros(''), '');
+});
+
+/* -------------------------------------------------------------------------- */
+/* Onboarding ages                                                             */
+/* -------------------------------------------------------------------------- */
+
+test('blank ages hold Continue back without a warning', () => {
+  // The wizard starts both ages at 0: not entered yet, so not wrong yet.
+  assert.deepEqual(checkAges({ age: 0, retirementAge: 0 }), { ready: false, problems: [] });
+  assert.deepEqual(checkAges({ age: 32, retirementAge: 0 }), { ready: false, problems: [] });
+  assert.deepEqual(checkAges({ age: 0, retirementAge: 60 }), { ready: false, problems: [] });
+});
+
+test('entered ages continue only when they make sense', () => {
+  assert.deepEqual(checkAges({ age: 32, retirementAge: 60 }), { ready: true, problems: [] });
+
+  const early = checkAges({ age: 45, retirementAge: 40 });
+  assert.equal(early.ready, false);
+  assert.deepEqual(early.problems, ['Retirement age needs to be higher than your current age.']);
+
+  const equal = checkAges({ age: 60, retirementAge: 60 });
+  assert.equal(equal.ready, false, 'retiring at the age you already are leaves nothing to plan');
+
+  assert.deepEqual(checkAges({ age: 12, retirementAge: 60 }).problems, ['Enter an age between 16 and 100.']);
+  assert.deepEqual(checkAges({ age: 30, retirementAge: 120 }).problems, ['Retirement age can be at most 100.']);
 });

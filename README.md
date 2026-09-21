@@ -41,7 +41,7 @@ The active engine is shown in the sidebar and returned by `GET /api/health`, so 
 | **Goals** | Per-goal projection with inflation applied to the target date. Test a contribution change with sliders, then commit it. |
 | **Scenario Lab** | Nine levers — save more, spend less, retire earlier, lump sum, market crash, career break, inflation, pay rise, allocation. Every drag re-runs the model in the browser. Pin scenarios to compare them. |
 | **Portfolio** | Covariance-based volatility, drift from target, exact rebalancing trades, fee drag, concentration on single securities only, avalanche vs snowball debt payoff. |
-| **Next Best Actions** | Fifteen rule checks producing ranked, quantified actions. Each has an **Apply to my plan** button that actually mutates the plan. |
+| **Next Best Actions** | Twelve rule checks producing ranked, quantified actions. Each has an **Apply to my plan** button that actually mutates the plan. |
 | **AI Assistant** | Ask in plain language. The reasoning trace shows the plan, every tool call with timing, retrieved knowledge, and a grounding check on every figure in the answer. |
 | **Assumptions** | Every assumption the platform uses, editable. Change inflation or the withdrawal rate and the whole plan re-scores. Includes what is deliberately *not* modelled. |
 

@@ -6,13 +6,12 @@ import {
   formatCompact,
   RISK_QUESTIONS,
   scoreRisk,
-  type Currency,
   type Goal,
   type UserProfile,
 } from '@wealth/shared';
 import { api, type PersonaSummary } from '../lib/api';
 import { useProfile } from '../state/ProfileContext';
-import { Callout, MoneyInput, ScoreRing } from '../components/ui';
+import { Callout, MoneyInput, NumberInput, ScoreRing } from '../components/ui';
 
 /**
  * Onboarding.
@@ -40,6 +39,45 @@ const STEP_TITLES = [
 
 const DEFAULT_EXPENSES = ['Housing', 'Food', 'Transport', 'Utilities', 'Healthcare', 'Lifestyle', 'Other'];
 
+/**
+ * A stored fraction as the percentage its field shows. Two decimals rather than
+ * whole numbers, so an 8.5% rate reads back as 8.5 instead of snapping to 9
+ * while the plan quietly uses 8.5; the rounding only strips float noise
+ * (0.07 * 100 is 7.000000000000001).
+ */
+function asPercent(fraction: number): number {
+  return Math.round(fraction * 10000) / 100;
+}
+
+const MIN_AGE = 16;
+const MAX_AGE = 100;
+
+/**
+ * Whether the two ages are entered and sensible, and what to say if not.
+ *
+ * The wizard starts both at 0, meaning "not entered yet" - they are the user's
+ * to state, and pre-filling 30 and 60 put numbers in the plan nobody chose. An
+ * empty field is unfinished rather than wrong, so it holds Continue back
+ * without a warning: nobody should open a form and find it already in red.
+ */
+export function checkAges(d: Pick<UserProfile, 'age' | 'retirementAge'>): {
+  ready: boolean;
+  problems: string[];
+} {
+  const problems: string[] = [];
+  if (d.age !== 0 && (d.age < MIN_AGE || d.age > MAX_AGE)) {
+    problems.push(`Enter an age between ${MIN_AGE} and ${MAX_AGE}.`);
+  }
+  if (d.age !== 0 && d.retirementAge !== 0) {
+    if (d.retirementAge <= d.age) {
+      problems.push('Retirement age needs to be higher than your current age.');
+    } else if (d.retirementAge > MAX_AGE) {
+      problems.push(`Retirement age can be at most ${MAX_AGE}.`);
+    }
+  }
+  return { ready: d.age !== 0 && d.retirementAge !== 0 && problems.length === 0, problems };
+}
+
 export function Onboarding() {
   const navigate = useNavigate();
   const { setProfile, createFromPersona, theme, toggleTheme } = useProfile();
@@ -52,6 +90,10 @@ export function Onboarding() {
   const [draft, setDraft] = useState<UserProfile>(() => {
     const base = emptyProfile('draft', '');
     base.cashflow.monthlyExpenses = Object.fromEntries(DEFAULT_EXPENSES.map((c) => [c, 0]));
+    // Blank, not 30 and 60: see `checkAges`. `emptyProfile` keeps its defaults,
+    // because the server's blank-profile path needs a profile that projects.
+    base.age = 0;
+    base.retirementAge = 0;
     return base;
   });
 
@@ -68,9 +110,13 @@ export function Onboarding() {
 
   // Live preview. Cheap enough to recompute on every change - it is arithmetic
   // over a small object, not a network call.
+  const ages = checkAges(draft);
+
   const preview = useMemo(() => {
     const hasIncome = draft.cashflow.monthlyNetIncome > 0;
-    if (!hasIncome) return null;
+    // Someone who goes back and clears their age would otherwise see a score
+    // worked out for a 0-year-old.
+    if (!hasIncome || !checkAges(draft).ready) return null;
     try {
       return buildSnapshot(draft);
     } catch {
@@ -127,7 +173,7 @@ export function Onboarding() {
   const canAdvance = (): boolean => {
     switch (step) {
       case 1:
-        return draft.displayName.trim().length > 0 && draft.retirementAge > draft.age;
+        return draft.displayName.trim().length > 0 && ages.ready;
       case 2:
         return draft.cashflow.monthlyNetIncome > 0;
       default:
@@ -240,56 +286,43 @@ export function Onboarding() {
                   />
                 </div>
                 <div className="field">
-                  <span className="field-label">Currency</span>
-                  <div className="switch" role="group" aria-label="Currency">
-                    {(['INR', 'USD'] as Currency[]).map((c) => (
-                      <button
-                        key={c}
-                        aria-pressed={draft.currency === c}
-                        onClick={() => update((d) => void (d.currency = c))}
-                      >
-                        {c === 'INR' ? '₹ INR' : '$ USD'}
-                      </button>
-                    ))}
-                  </div>
-                </div>
-                <div className="field">
                   <label htmlFor="ob-age">Your age</label>
-                  <input
+                  <NumberInput
                     id="ob-age"
                     className="input num"
-                    type="number"
-                    min={16}
-                    max={100}
+                    placeholder=""
+                    min={MIN_AGE}
+                    max={MAX_AGE}
                     value={draft.age}
-                    onChange={(e) => update((d) => void (d.age = Number(e.target.value) || 30))}
+                    onChange={(v) => update((d) => void (d.age = v))}
                   />
                 </div>
                 <div className="field">
                   <label htmlFor="ob-retire">Target retirement age</label>
-                  <input
+                  <NumberInput
                     id="ob-retire"
                     className="input num"
-                    type="number"
+                    placeholder=""
                     min={draft.age + 1}
-                    max={100}
+                    max={MAX_AGE}
                     value={draft.retirementAge}
-                    onChange={(e) => update((d) => void (d.retirementAge = Number(e.target.value) || 60))}
+                    onChange={(v) => update((d) => void (d.retirementAge = v))}
                   />
-                  <div className="field-hint">
-                    {Math.max(0, draft.retirementAge - draft.age)} years of earning left to plan with
-                  </div>
+                  {ages.ready && (
+                    <div className="field-hint">
+                      {draft.retirementAge - draft.age} years of earning left to plan with
+                    </div>
+                  )}
                 </div>
                 <div className="field">
                   <label htmlFor="ob-dependents">People financially dependent on you</label>
-                  <input
+                  <NumberInput
                     id="ob-dependents"
                     className="input num"
-                    type="number"
                     min={0}
                     max={12}
                     value={draft.dependents}
-                    onChange={(e) => update((d) => void (d.dependents = Number(e.target.value) || 0))}
+                    onChange={(v) => update((d) => void (d.dependents = v))}
                   />
                 </div>
                 <div className="field">
@@ -309,9 +342,11 @@ export function Onboarding() {
                   <div className="field-hint">This caps how much investment risk the plan will suggest.</div>
                 </div>
               </div>
-              {draft.retirementAge <= draft.age && (
-                <Callout tone="warning">Retirement age needs to be higher than your current age.</Callout>
-              )}
+              {ages.problems.map((problem) => (
+                <Callout key={problem} tone="warning">
+                  {problem}
+                </Callout>
+              ))}
             </div>
           )}
 
@@ -336,18 +371,15 @@ export function Onboarding() {
                 <div className="field">
                   <label htmlFor="ob-growth">Expected annual pay rise</label>
                   <div className="input-prefix">
-                    <input
+                    <NumberInput
                       id="ob-growth"
                       className="input num"
-                      type="number"
                       min={0}
                       max={50}
                       step={1}
                       style={{ paddingLeft: 11 }}
-                      value={Math.round(draft.cashflow.annualIncomeGrowthPct * 100)}
-                      onChange={(e) =>
-                        update((d) => void (d.cashflow.annualIncomeGrowthPct = (Number(e.target.value) || 0) / 100))
-                      }
+                      value={asPercent(draft.cashflow.annualIncomeGrowthPct)}
+                      onChange={(v) => update((d) => void (d.cashflow.annualIncomeGrowthPct = v / 100))}
                     />
                   </div>
                   <div className="field-hint">Percent per year. Drives the step-up recommendation.</div>
@@ -565,17 +597,14 @@ export function Onboarding() {
                     />
                   </div>
                   <div style={{ flex: '0 1 88px' }} className="field">
-                    <input
+                    <NumberInput
                       className="input num"
-                      type="number"
                       min={0}
                       max={100}
                       step={0.5}
                       aria-label="Interest rate percent"
-                      value={(l.interestRatePct * 100).toFixed(1)}
-                      onChange={(e) =>
-                        update((d) => void (d.liabilities[i]!.interestRatePct = (Number(e.target.value) || 0) / 100))
-                      }
+                      value={asPercent(l.interestRatePct)}
+                      onChange={(v) => update((d) => void (d.liabilities[i]!.interestRatePct = v / 100))}
                     />
                     <div className="field-hint">% APR</div>
                   </div>
@@ -699,16 +728,13 @@ export function Onboarding() {
                     />
                     <div className="field">
                       <label htmlFor={`goal-stepup-${g.id}`}>Annual step-up</label>
-                      <input
+                      <NumberInput
                         id={`goal-stepup-${g.id}`}
                         className="input num"
-                        type="number"
                         min={0}
                         max={50}
-                        value={Math.round(g.contributionStepUpPct * 100)}
-                        onChange={(e) =>
-                          update((d) => void (d.goals[i]!.contributionStepUpPct = (Number(e.target.value) || 0) / 100))
-                        }
+                        value={asPercent(g.contributionStepUpPct)}
+                        onChange={(v) => update((d) => void (d.goals[i]!.contributionStepUpPct = v / 100))}
                       />
                       <div className="field-hint">% increase each year</div>
                     </div>

@@ -273,6 +273,9 @@ export function heuristicPlan(intent: Intent): AgentPlanStep[] {
       return [
         ...base,
         step('project_goal', 'Project the goal in question to its target date'),
+        // Goals compete for one pool, so a gap on one is only answerable
+        // alongside what funding it would cost the others.
+        step('optimise_goal_funding', 'Work out how the surplus should be split across the goals'),
         step('run_monte_carlo', 'Test the projection against a range of market outcomes'),
         step('synthesize', 'Explain whether the goal is on track and what would close any gap'),
       ];
@@ -307,6 +310,7 @@ export function heuristicPlan(intent: Intent): AgentPlanStep[] {
       return [
         ...base,
         step('get_next_best_actions', 'Rank the highest-impact actions'),
+        step('optimise_goal_funding', 'Check where the money each goal needs should come from'),
         step('search_knowledge', 'Ground the top action in a principle'),
         step('synthesize', 'Present the actions in priority order with their impact'),
       ];

@@ -1,5 +1,5 @@
 import { createApp } from './app.js';
-import { config } from './config.js';
+import { activeModel, config } from './config.js';
 import { logger } from './lib/logger.js';
 
 /**
@@ -12,7 +12,7 @@ const server = app.listen(config.port, () => {
   logger.info('AI Wealth Navigator API listening', {
     port: config.port,
     engine: config.provider,
-    model: config.provider === 'deterministic' ? 'none (deterministic engine)' : config.model,
+    model: activeModel() ?? 'none (deterministic engine)',
     store: config.tableName ? `dynamodb:${config.tableName}` : 'memory',
   });
 });

@@ -20,3 +20,4 @@ export * from './finance/mutations.js';
 export * from './finance/engine.js';
 export * from './data/personas.js';
 export * from './impact.js';
+export * from './optimiser.js';

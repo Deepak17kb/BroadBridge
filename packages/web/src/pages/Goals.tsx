@@ -10,11 +10,14 @@ import {
   portfolioVolatility,
   recommendAllocation,
   yearsToGoal,
+  applyActionMutation,
+  optimiseGoalFunding,
   type Goal,
 } from '@wealth/shared';
 import { useLoadedProfile, useProfile } from '../state/ProfileContext';
 import { AssumptionList, Badge, Callout, Card, Empty, MoneyInput, ProgressBar, Slider, Stat } from '../components/ui';
 import { GoalFundingChart, MonteCarloFan, TableToggle } from '../components/charts/Charts';
+import { SurplusSplit } from '../components/SurplusSplit';
 
 /**
  * Goal planning.
@@ -31,11 +34,37 @@ export function Goals() {
   const { currency } = profile;
 
   const [selectedId, setSelectedId] = useState<string | null>(profile.goals[0]?.id ?? null);
+  const [splitApplied, setSplitApplied] = useState(false);
   const [testExtra, setTestExtra] = useState(0);
   const [testLump, setTestLump] = useState(0);
 
   const selected = profile.goals.find((g) => g.id === selectedId) ?? null;
   const assumptions = resolveAssumptions(profile);
+
+  /*
+   * Run in the browser like every other projection on this page: it is the same
+   * engine the endpoint calls, so the split shown here and the one the agent
+   * quotes are the same numbers, and the user sees it move as they edit a goal.
+   */
+  const split = useMemo(
+    () => optimiseGoalFunding({ profile, snapshot }),
+    [profile, snapshot],
+  );
+
+  /** Rewrites every contribution to the optimiser's split, through the shared applier. */
+  function applySplit() {
+    updateProfile((draft) => {
+      applyActionMutation(
+        draft,
+        {
+          type: 'set_goal_contributions',
+          allocations: split.allocations.map((a) => ({ goalId: a.goalId, monthly: a.allocated })),
+        },
+        { recommendedAllocation: snapshot.recommendedAllocation },
+      );
+    });
+    setSplitApplied(true);
+  }
 
   const projection = useMemo(() => {
     if (!selected) return null;
@@ -110,6 +139,16 @@ export function Goals() {
           </button>
         </div>
       </header>
+
+      {/* The competition between goals, before the per-goal detail that hides it. */}
+      {profile.goals.length > 1 && (
+        <SurplusSplit
+          result={split}
+          currency={currency}
+          onApply={applySplit}
+          applied={splitApplied}
+        />
+      )}
 
       {profile.goals.length === 0 ? (
         <Card>

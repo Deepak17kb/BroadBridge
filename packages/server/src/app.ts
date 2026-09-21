@@ -1,7 +1,7 @@
 import cors from 'cors';
 import express, { type Express } from 'express';
 import { DEFAULT_ASSUMPTIONS, RISK_QUESTIONS } from '@wealth/shared';
-import { config } from './config.js';
+import { activeModel, config } from './config.js';
 import { errorMiddleware } from './lib/http.js';
 import { logger } from './lib/logger.js';
 import { getStore } from './store/index.js';
@@ -50,7 +50,7 @@ export function createApp(): Express {
       status: 'ok',
       version: '1.0.0',
       engine: config.provider,
-      model: config.provider === 'deterministic' ? null : config.model,
+      model: activeModel(),
       time: new Date().toISOString(),
     });
   });

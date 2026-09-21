@@ -90,7 +90,7 @@ export function Actions() {
 
       <div className="grid grid-4">
         <Card>
-          <Stat label="Actions identified" value={snapshot.actions.length} meta="from 15 rule checks" />
+          <Stat label="Actions identified" value={snapshot.actions.length} meta="from 12 rule checks" />
         </Card>
         <Card>
           <Stat

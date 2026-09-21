@@ -37,7 +37,7 @@ npm run verify     # typecheck + 117 tests + build
 
 ### Enable the language model (optional)
 
-Without credentials the agent runs its deterministic engine — every feature works, the prose is less fluent. To use Claude:
+Without credentials the agent runs its deterministic engine — every feature works, the prose is less fluent. To use a model:
 
 ```bash
 # Option A - Anthropic API
@@ -48,8 +48,21 @@ export LLM_PROVIDER=bedrock
 export AWS_REGION=us-east-1
 export AWS_PROFILE=your-profile
 
+# Option C - Groq, for open-weights models over an OpenAI-compatible endpoint
+export GROQ_API_KEY=gsk_...
+
 npm run dev
 ```
+
+`npm run dev` also loads `.env` from the repository root if one exists, so a key
+can live there instead of in your shell.
+
+> **Groq quotas.** Each agent step costs roughly 3,000 tokens with all 14 tool
+> schemas attached. A free Groq account allows 8,000 tokens per minute, which is
+> about two steps, so a multi-step question will often exhaust the allowance
+> mid-run. That is not a failure: the run falls back to the deterministic engine
+> and the answer still arrives with the same numbers. For consistently
+> model-narrated answers on Groq, raise the account's tier.
 
 Confirm which engine is live:
 
@@ -65,8 +78,13 @@ The sidebar shows the same badge, so it is never ambiguous which engine produced
 | Variable | Default | Purpose |
 |---|---|---|
 | `PORT` | `4000` | API port |
-| `LLM_PROVIDER` | auto-detected | `bedrock`, `anthropic` or `deterministic` |
+| `LLM_PROVIDER` | auto-detected | `bedrock`, `anthropic`, `groq` or `deterministic` |
 | `ANTHROPIC_API_KEY` | — | Selects the `anthropic` provider when set |
+| `GROQ_API_KEY` | — | Selects the `groq` provider when set, unless an Anthropic key is also present |
+| `GROQ_MODEL` | `openai/gpt-oss-120b` | Any tool-capable Groq model; `reasoning_effort` is sent only to the gpt-oss and qwen3 families |
+| `GROQ_MAX_TOKENS` | `1500` | Completion ceiling. Groq reserves this against a per-minute allowance, so it is deliberately below the orchestrator's request |
+| `GROQ_RETRY_BUDGET_MS` | `12000` | Total time one call may spend waiting out a 429. A free account asks for 9-10s mid-run; past the budget the deterministic engine answers instead |
+| `GROQ_BASE_URL` | `https://api.groq.com/openai/v1` | For a Groq-compatible gateway |
 | `CLAUDE_MODEL` | `claude-opus-5` | First-party model id; Bedrock adds the `anthropic.` prefix |
 | `AWS_REGION` | `ap-south-1` | Region for Bedrock and DynamoDB |
 | `TABLE_NAME` | — | DynamoDB table. Unset uses the in-memory store. |

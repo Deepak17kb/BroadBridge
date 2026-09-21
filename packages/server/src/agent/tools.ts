@@ -4,6 +4,7 @@ import {
   buildSnapshot,
   computeActionImpact,
   describeLevers,
+  optimiseGoalFunding,
   planDebtPayoff,
   planningHorizon,
   portfolioExpectedReturn,
@@ -514,6 +515,82 @@ export const TOOLS: ToolDefinition[] = [
   },
 
   {
+    name: 'optimise_goal_funding',
+    label: 'Splitting the surplus across the goals',
+    description:
+      "Divides the money available each month across the user's goals and reports what the goals that lose out actually lose, in years of delay. Use whenever a goal is short, whenever the user asks which goal to fund first, or whenever the separate per-goal gaps add up to more than they earn. The pool is free surplus plus what the goals already receive, so it works even when there is no spare cash - the answer is then that the committed money is pointed at the wrong goals. Never present the per-goal gaps as if they could all be funded at once without checking this first.",
+    inputSchema: {
+      type: 'object',
+      properties: {
+        surplusOverride: {
+          type: 'number',
+          description: 'Divide this monthly amount instead of the computed pool',
+        },
+      },
+      required: [],
+    },
+    handler: (input: { surplusOverride?: number }, ctx) => {
+      const result = optimiseGoalFunding({
+        profile: ctx.profile,
+        surplusOverride: input.surplusOverride,
+      });
+
+      const lines = [
+        `Dividing ${money(result.available, ctx)} a month across ${result.allocations.length} goals:`,
+        ...result.allocations.map(
+          (a) =>
+            `- ${a.goalName} (${a.priority.replace('_', ' ')}, ${a.yearsToGoal.toFixed(1)}y): gets ${money(a.allocated, ctx)} of the ${money(a.requiredMonthly, ctx)} it needs, leaving it ${(a.resultingFundedRatio * 100).toFixed(0)}% funded${a.onTrack ? ' - on track' : ''}`,
+        ),
+        ...(result.starved.length
+          ? [
+              '',
+              'What that costs:',
+              ...result.starved.map(
+                (s) =>
+                  `- ${s.goalName} is short ${money(s.unmetMonthly, ctx)} a month and arrives ${
+                    s.yearsDelayIfUnfunded === null
+                      ? 'not at all within 40 years'
+                      : `about ${s.yearsDelayIfUnfunded} years later`
+                  }`,
+              ),
+            ]
+          : []),
+        ...(result.toRetirementGap > 0
+          ? ['', `${money(result.toRetirementGap, ctx)} a month is left over and goes to the retirement gap.`]
+          : []),
+        '',
+        result.rationale,
+      ];
+
+      return {
+        summary: lines.join('\n'),
+        data: result,
+        facts: {
+          'monthly pool available': result.available,
+          'unallocated monthly': result.unallocated,
+          'to retirement gap': result.toRetirementGap,
+          'to invest': result.toInvest,
+          ...Object.fromEntries(
+            result.allocations.flatMap((a) => [
+              [`${a.goalName} allocated`, a.allocated],
+              [`${a.goalName} required monthly`, a.requiredMonthly],
+              [`${a.goalName} funded ratio after allocation`, a.resultingFundedRatio],
+            ]),
+          ),
+          ...Object.fromEntries(
+            result.starved.flatMap((s) => [
+              [`${s.goalName} unmet monthly`, s.unmetMonthly],
+              ...(s.yearsDelayIfUnfunded !== null
+                ? [[`${s.goalName} years of delay`, s.yearsDelayIfUnfunded] as const]
+                : []),
+            ]),
+          ),
+        },
+      };
+    },
+  },
+
+  {
     name: 'plan_debt_payoff',
     label: 'Comparing debt payoff strategies',
     description:
@@ -783,9 +860,19 @@ export const TOOLS: ToolDefinition[] = [
 
 export const TOOL_MAP = new Map(TOOLS.map((t) => [t.name, t]));
 
-/** Tool definitions in the shape the Messages API expects. */
-export function toolSchemas(): Anthropic.Tool[] {
-  return TOOLS.map((tool) => ({
+/**
+ * Tool definitions in the shape the Messages API expects.
+ *
+ * `only` narrows the set to the named tools, in the declared order. The whole
+ * catalogue is re-sent on every step of the agent loop - measured at 1,641
+ * prompt tokens for all fourteen against Groq's tokeniser - so on an account
+ * whose ceiling is a per-minute token allowance the schemas, not the
+ * conversation, are what exhausts it. Names that match no tool are ignored, so
+ * a caller may pass a plan containing `synthesize` without filtering it first.
+ */
+export function toolSchemas(only?: readonly string[]): Anthropic.Tool[] {
+  const wanted = only ? new Set(only) : null;
+  return TOOLS.filter((tool) => !wanted || wanted.has(tool.name)).map((tool) => ({
     name: tool.name,
     description: tool.description,
     input_schema: tool.inputSchema,

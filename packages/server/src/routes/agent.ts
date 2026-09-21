@@ -1,7 +1,7 @@
 import { Router } from 'express';
 import { z } from 'zod';
 import type { AgentEvent, AgentMessage, ChatSession } from '@wealth/shared';
-import { config } from '../config.js';
+import { activeModel, config } from '../config.js';
 import { asyncHandler, notFound, parseBody } from '../lib/http.js';
 import { logger } from '../lib/logger.js';
 import { SseStream } from '../lib/sse.js';
@@ -31,7 +31,7 @@ router.get(
   asyncHandler(async (_req, res) => {
     res.json({
       engine: config.provider,
-      model: config.provider === 'deterministic' ? null : config.model,
+      model: activeModel(),
       maxSteps: config.maxAgentSteps,
       simulationPaths: config.simulationPaths,
       tools: TOOLS.map((t) => ({

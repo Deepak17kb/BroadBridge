@@ -8,9 +8,14 @@
  *   2. `anthropic`     - ANTHROPIC_API_KEY set. Direct Claude API.
  *   3. `bedrock`       - AWS_REGION + Bedrock access. Claude via Amazon Bedrock,
  *                        which is what the deployed stack uses.
+ *   4. `groq`          - GROQ_API_KEY set. Open-weights models (gpt-oss, qwen)
+ *                        on Groq's inference hardware, reached over their
+ *                        OpenAI-compatible endpoint. Fast and cheap; the engine,
+ *                        the tools and the verifier are unchanged, so the model
+ *                        only ever changes the prose.
  */
 
-export type LlmProvider = 'bedrock' | 'anthropic' | 'deterministic';
+export type LlmProvider = 'bedrock' | 'anthropic' | 'groq' | 'deterministic';
 
 function envFlag(name: string, fallback = false): boolean {
   const raw = process.env[name];
@@ -25,10 +30,26 @@ function envInt(name: string, fallback: number): number {
   return Number.isFinite(parsed) ? parsed : fallback;
 }
 
+const PROVIDERS: readonly LlmProvider[] = ['bedrock', 'anthropic', 'groq', 'deterministic'];
+
+function isProvider(value: string | undefined): value is LlmProvider {
+  return !!value && (PROVIDERS as readonly string[]).includes(value);
+}
+
+/** Keeps the base URL joinable, whatever shape the operator typed it in. */
+function stripTrailingSlashes(url: string): string {
+  let end = url.length;
+  while (end > 0 && url[end - 1] === '/') end -= 1;
+  return url.slice(0, end);
+}
+
 function resolveProvider(): LlmProvider {
   const forced = process.env.LLM_PROVIDER?.toLowerCase();
-  if (forced === 'bedrock' || forced === 'anthropic' || forced === 'deterministic') return forced;
+  if (isProvider(forced)) return forced;
   if (process.env.ANTHROPIC_API_KEY) return 'anthropic';
+  // Ordered after Anthropic deliberately: with both keys present the
+  // first-party path wins, and GROQ_API_KEY alone is an unambiguous choice.
+  if (process.env.GROQ_API_KEY) return 'groq';
   // Any Lambda/ECS task with a region and an execution role can reach Bedrock.
   if (process.env.AWS_REGION && envFlag('ENABLE_BEDROCK', true) && process.env.AWS_LAMBDA_FUNCTION_NAME)
     return 'bedrock';
@@ -41,12 +62,51 @@ export interface AppConfig {
   provider: LlmProvider;
   /** Model id in first-party form. The Bedrock client adds the `anthropic.` prefix. */
   model: string;
+  /** Model id used when the provider is `groq`; unrelated to `model` above. */
+  groqModel: string;
+  /** Overridable so a Groq-compatible gateway or a test double can stand in. */
+  groqBaseUrl: string;
+  /**
+   * Completion ceiling for the Groq path, which is lower than the orchestrator
+   * asks for on purpose: narration does not need 8000 tokens, and a runaway
+   * chain of thought on a reasoning model is charged as completion.
+   *
+   * It is not a rate-limit control. Groq meters the per-minute allowance on
+   * prompt tokens plus the completion actually written, not on `max_tokens`
+   * reserved - verified against a live account, where a request carrying
+   * `max_tokens: 4000` was admitted with 927 tokens left in the minute and
+   * cost 151. What exhausts the allowance is `agentToolScope`.
+   */
+  groqMaxTokens: number;
+  /**
+   * Total time the Groq client may spend waiting out transient failures in
+   * one call. A free account asks for 9-10s mid-run, so anything under that
+   * rejects the retries worth taking; past the budget the deterministic
+   * engine answers immediately with the same numbers.
+   */
+  groqRetryBudgetMs: number;
   awsRegion: string;
   /** DynamoDB table name. When unset the server uses its in-memory store. */
   tableName?: string;
   corsOrigins: string[];
   /** Hard ceiling on agent tool-calling iterations, to bound cost and latency. */
   maxAgentSteps: number;
+  /**
+   * Which tools the model is offered on each step of the agent loop.
+   *
+   * `all` hands it the whole catalogue, which is what a provider metered on
+   * requests or on spend should get: the model can always reach for the right
+   * tool. `plan` narrows the schemas to the toolchain the intent router already
+   * chose, plus the two every answer may need.
+   *
+   * The distinction exists because the catalogue is re-sent in full on every
+   * step - 1,641 prompt tokens for fourteen tools, measured against Groq's
+   * tokeniser. Three steps of that is 4,900 tokens of an 8,000-token minute
+   * spent restating tools the plan was never going to use, which is why a
+   * single question used to exhaust a free account's allowance and fall back to
+   * the deterministic engine part-way through.
+   */
+  agentToolScope: 'plan' | 'all';
   /** Monte Carlo paths for API-triggered simulations. */
   simulationPaths: number;
   requestTimeoutMs: number;
@@ -58,14 +118,38 @@ export const config: AppConfig = {
   nodeEnv: process.env.NODE_ENV ?? 'development',
   provider: resolveProvider(),
   model: process.env.CLAUDE_MODEL ?? 'claude-opus-5',
+  // 131k context, reliable tool use, and the best writer Groq serves.
+  groqModel: process.env.GROQ_MODEL ?? 'openai/gpt-oss-120b',
+  groqBaseUrl: stripTrailingSlashes(process.env.GROQ_BASE_URL ?? 'https://api.groq.com/openai/v1'),
+  groqMaxTokens: envInt('GROQ_MAX_TOKENS', 1500),
+  groqRetryBudgetMs: envInt('GROQ_RETRY_BUDGET_MS', 12_000),
   awsRegion: process.env.AWS_REGION ?? 'ap-south-1',
   tableName: process.env.TABLE_NAME,
   corsOrigins: (process.env.CORS_ORIGINS ?? '*').split(',').map((s) => s.trim()),
   maxAgentSteps: envInt('MAX_AGENT_STEPS', 6),
+  // Only the Groq path is metered on tokens per minute tightly enough for the
+  // schemas to be what runs it out, so only it narrows by default. The knob is
+  // read by the orchestrator, which stays free of provider branching.
+  agentToolScope:
+    process.env.AGENT_TOOL_SCOPE === 'plan' || process.env.AGENT_TOOL_SCOPE === 'all'
+      ? process.env.AGENT_TOOL_SCOPE
+      : resolveProvider() === 'groq'
+        ? 'plan'
+        : 'all',
   simulationPaths: envInt('SIMULATION_PATHS', 2000),
   requestTimeoutMs: envInt('REQUEST_TIMEOUT_MS', 60_000),
   logLevel: (process.env.LOG_LEVEL as AppConfig['logLevel']) ?? 'info',
 };
+
+/**
+ * The model actually answering. `config.model` is the Claude id and is wrong
+ * for Groq, so every place that reports the model to a user goes through here -
+ * a badge that names the wrong model is worse than no badge.
+ */
+export function activeModel(): string | null {
+  if (config.provider === 'deterministic') return null;
+  return config.provider === 'groq' ? config.groqModel : config.model;
+}
 
 /** Bedrock expects the model id prefixed with the provider name. */
 export function bedrockModelId(model: string): string {

@@ -6,7 +6,12 @@
  * same engine server-side and gets identical numbers.
  */
 
-export type Currency = 'INR' | 'USD';
+/**
+ * The platform is INR-only. Kept as a named single-member type rather than
+ * deleted: every profile and formatter still carries it, and narrowing it here
+ * is what lets the compiler prove no second currency exists anywhere.
+ */
+export type Currency = 'INR';
 
 export type RiskBucket = 'Conservative' | 'Moderate' | 'Balanced' | 'Growth' | 'Aggressive';
 
@@ -171,6 +176,28 @@ export interface MarketAssumptions {
   healthCoverFloorOver55: number;
   /** Added to the target for each dependent. */
   healthCoverPerDependent: number;
+
+  /*
+   * Goal-funding priority.
+   *
+   * When goals compete for one surplus, something has to decide the order. These
+   * weights are that decision, made explicit and editable rather than buried in
+   * the optimiser: a user who thinks a house deposit matters as much as
+   * retirement can say so, and watch the allocation change.
+   */
+
+  /** Multiplier on a `must_have` goal's funding score. */
+  goalWeightMustHave: number;
+  /** Multiplier on an `important` goal's funding score. */
+  goalWeightImportant: number;
+  /** Multiplier on an `aspirational` goal's funding score. */
+  goalWeightAspirational: number;
+  /**
+   * A goal this close to its target date funds before longer-horizon goals of
+   * equal priority, whatever the scores say - a near-term goal cannot be
+   * rescued later, and there is no compounding left to make up the difference.
+   */
+  nearTermGoalMonths: number;
 }
 
 export type AllocationWeights = Record<AssetClass, number>;
@@ -354,7 +381,15 @@ export interface NextBestAction {
     | { type: 'increase_goal_contribution'; goalId: string; amount: number }
     | { type: 'set_emergency_fund'; amount: number }
     | { type: 'rebalance_to_target' }
-    | { type: 'set_allocation'; weights: AllocationWeights };
+    | { type: 'set_allocation'; weights: AllocationWeights }
+    /**
+     * Sets several goal contributions at once, as the optimiser's split.
+     *
+     * Distinct from repeated `increase_goal_contribution` calls because the
+     * optimiser's answer is a *reallocation*: some goals go up, others come
+     * down, and applying it as a series of increases would only ever add.
+     */
+    | { type: 'set_goal_contributions'; allocations: { goalId: string; monthly: number }[] };
 }
 
 export interface DebtPayoffPlan {
@@ -523,7 +558,7 @@ export interface AgentMessage {
   /** Structured payloads the chat UI renders as cards instead of prose. */
   attachments?: AgentAttachment[];
   /** Which reasoning engine produced this turn. */
-  engine?: 'bedrock' | 'anthropic' | 'deterministic';
+  engine?: 'bedrock' | 'anthropic' | 'groq' | 'deterministic';
 }
 
 export type AgentAttachment =

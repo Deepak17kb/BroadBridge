@@ -10,8 +10,6 @@ import {
 } from 'react';
 import {
   buildSnapshot,
-  convertCurrency,
-  type Currency,
   type FinancialSnapshot,
   type UserProfile,
 } from '@wealth/shared';
@@ -46,7 +44,6 @@ interface ProfileContextValue {
   setProfile: (profile: UserProfile) => void;
   createFromPersona: (personaId?: string, displayName?: string) => Promise<UserProfile>;
   reset: () => void;
-  switchCurrency: (currency: Currency) => void;
   theme: 'dark' | 'light';
   toggleTheme: () => void;
 }
@@ -202,45 +199,6 @@ export function ProfileProvider({
     setSaveState('idle');
   }, []);
 
-  /**
-   * Switching display currency converts every stored amount at a fixed
-   * illustrative rate, rather than relabelling the same numbers - showing
-   * "$95,000" for a 95,000-rupee salary would be actively misleading.
-   */
-  const switchCurrency = useCallback(
-    (currency: Currency) => {
-      updateProfile((draft) => {
-        if (draft.currency === currency) return;
-        const from = draft.currency;
-        const c = (value: number) => Math.round(convertCurrency(value, from, currency));
-
-        draft.currency = currency;
-        draft.liquidSavings = c(draft.liquidSavings);
-        if (draft.lifeInsuranceCover) draft.lifeInsuranceCover = c(draft.lifeInsuranceCover);
-        if (draft.healthInsuranceCover) draft.healthInsuranceCover = c(draft.healthInsuranceCover);
-        draft.cashflow.monthlyNetIncome = c(draft.cashflow.monthlyNetIncome);
-        draft.cashflow.otherMonthlyIncome = c(draft.cashflow.otherMonthlyIncome);
-        draft.cashflow.monthlyExpenses = Object.fromEntries(
-          Object.entries(draft.cashflow.monthlyExpenses).map(([k, v]) => [k, c(v)]),
-        );
-        for (const h of draft.holdings) {
-          // Convert the price, not the units - units are a count, not an amount.
-          h.price = convertCurrency(h.price, from, currency);
-          h.costBasis = c(h.costBasis);
-        }
-        for (const l of draft.liabilities) {
-          l.outstanding = c(l.outstanding);
-          l.emi = c(l.emi);
-        }
-        for (const g of draft.goals) {
-          g.targetAmountToday = c(g.targetAmountToday);
-          g.currentSaved = c(g.currentSaved);
-          g.monthlyContribution = c(g.monthlyContribution);
-        }
-      });
-    },
-    [updateProfile],
-  );
 
   // Recomputed on every profile change. The engine is pure arithmetic over a
   // small object graph, so this is microseconds - cheap enough to run on each
@@ -258,7 +216,6 @@ export function ProfileProvider({
       setProfile,
       createFromPersona,
       reset,
-      switchCurrency,
       theme,
       toggleTheme: () => setTheme((t) => (t === 'dark' ? 'light' : 'dark')),
     }),
@@ -272,7 +229,6 @@ export function ProfileProvider({
       setProfile,
       createFromPersona,
       reset,
-      switchCurrency,
       theme,
     ],
   );

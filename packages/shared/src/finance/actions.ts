@@ -431,56 +431,133 @@ export function generateActions(ctx: ActionContext): NextBestAction[] {
     });
   }
 
-  /* 5. Cash drag - money sitting still. -------------------------------------- */
+  /* 5. Idle money - a lump sitting still, a monthly flow with no job, or both. */
   const excessCash = profile.liquidSavings - cashflow.emergencyFundTarget;
-  if (excessCash > cashflow.monthlyExpenses) {
-    const years = 10;
-    const inCash = futureValueLumpSum(excessCash, assumptions.expectedReturns.cash, years);
-    const invested = futureValueLumpSum(excessCash, expectedReturn, years);
+  const lumpIsIdle = excessCash > cashflow.monthlyExpenses;
+  const flowIsIdle =
+    cashflow.monthlySurplus > cashflow.monthlyIncome * 0.05 &&
+    !expensiveDebts.length &&
+    cashflow.emergencyFundGap === 0;
+
+  if (lumpIsIdle || flowIsIdle) {
+    // One horizon for both halves. They used to be separate rules projected over
+    // different periods (10 years and time-to-retirement), and adding those two
+    // figures together would have been meaningless.
+    const years = Math.max(5, retirement.yearsToRetirement);
+    const inCash = lumpIsIdle
+      ? futureValueLumpSum(excessCash, assumptions.expectedReturns.cash, years)
+      : 0;
+    const invested = lumpIsIdle ? futureValueLumpSum(excessCash, expectedReturn, years) : 0;
+    const lumpGain = invested - inCash;
+    const flowValue = flowIsIdle
+      ? cashflow.monthlySurplus * stepFactor(expectedReturn, years, 0.05)
+      : 0;
+
+    const title =
+      lumpIsIdle && flowIsIdle
+        ? `Put ${fmt(excessCash)} of idle cash and ${fmt(cashflow.monthlySurplus)}/month to work`
+        : lumpIsIdle
+          ? `Put ${fmt(excessCash)} of idle cash to work`
+          : `Automate ${fmt(cashflow.monthlySurplus)}/month of unallocated surplus`;
+
+    const why = [
+      lumpIsIdle
+        ? `You hold ${fmt(profile.liquidSavings)} in cash but only need ${fmt(cashflow.emergencyFundTarget)} as a buffer. The surplus earns about ${(assumptions.expectedReturns.cash * 100).toFixed(1)}% while inflation runs at ${(assumptions.inflationPct * 100).toFixed(1)}% - it loses purchasing power every month.`
+        : '',
+      flowIsIdle
+        ? `You also have ${fmt(cashflow.monthlySurplus)} a month that is not committed to any goal. Money without a job tends to get spent - automating it on payday removes the decision.`
+        : '',
+    ]
+      .filter(Boolean)
+      .join(' ');
+
     actions.push({
-      id: 'deploy-idle-cash',
-      title: `Put ${fmt(excessCash)} of idle cash to work`,
+      id: 'deploy-surplus',
+      title,
       category: 'investing',
-      why: `You hold ${fmt(profile.liquidSavings)} in cash but only need ${fmt(cashflow.emergencyFundTarget)} as a buffer. The surplus is earning about ${(assumptions.expectedReturns.cash * 100).toFixed(1)}% while inflation runs at ${(assumptions.inflationPct * 100).toFixed(1)}% - it is losing purchasing power every month.`,
+      why,
       impact: {
         metric: `Extra value over ${years} years`,
-        value: round(invested - inCash, 0),
+        value: round(lumpGain + flowValue, 0),
         unit: currencyUnit,
       },
       effort: 'low',
-      priorityScore: clamp(45 + (excessCash / (cashflow.monthlyExpenses || 1)) * 2, 45, 80),
+      // The merged rule ranks as urgently as the most urgent thing inside it,
+      // so consolidating never buries a signal that used to surface on its own.
+      priorityScore: Math.max(
+        lumpIsIdle ? clamp(45 + (excessCash / (cashflow.monthlyExpenses || 1)) * 2, 45, 80) : 0,
+        flowIsIdle ? 52 : 0,
+      ),
       steps: [
-        `Keep ${fmt(cashflow.emergencyFundTarget)} liquid and invest the remaining ${fmt(excessCash)}.`,
-        `Deploy it into your ${risk.bucket} target mix over 3-6 monthly tranches rather than all at once, to avoid buying a single bad day.`,
-        'Point it at the goal with the largest shortfall first.',
+        ...(lumpIsIdle
+          ? [
+              `Keep ${fmt(cashflow.emergencyFundTarget)} liquid and invest the remaining ${fmt(excessCash)}.`,
+              `Deploy it into your ${risk.bucket} target mix over 3-6 monthly tranches rather than all at once, to avoid buying a single bad day.`,
+            ]
+          : []),
+        ...(flowIsIdle
+          ? [
+              `Set up an automatic monthly investment of ${fmt(cashflow.monthlySurplus)} dated for the day after payday.`,
+              `Invest it in your ${risk.bucket} target mix.`,
+            ]
+          : []),
+        'Attach it to a named goal - funded goals get abandoned far less often than "investing in general".',
       ],
       assumptions: [
-        {
-          label: 'Cash return',
-          value: `${(assumptions.expectedReturns.cash * 100).toFixed(1)}%/yr vs ${(expectedReturn * 100).toFixed(1)}% invested`,
-          source: 'market_assumption',
-        },
-        { label: 'Horizon', value: `${years} years, nominal, pre-tax`, source: 'model_default' },
+        ...(lumpIsIdle
+          ? [
+              {
+                label: 'Cash return',
+                value: `${(assumptions.expectedReturns.cash * 100).toFixed(1)}%/yr vs ${(expectedReturn * 100).toFixed(1)}% invested`,
+                source: 'market_assumption' as const,
+              },
+            ]
+          : []),
+        ...(flowIsIdle
+          ? [
+              {
+                label: 'Surplus',
+                value: `${fmt(cashflow.monthlySurplus)}/month after expenses, EMIs and existing goals, stepped up 5% a year`,
+                source: 'derived' as const,
+              },
+            ]
+          : []),
+        { label: 'Horizon', value: `${years} years, nominal, pre-tax`, source: 'model_default' as const },
         {
           label: 'Not modelled',
           value: 'Capital gains tax on redemption and any short-term cash needs you have not entered',
-          source: 'model_default',
+          source: 'model_default' as const,
         },
       ],
       evidence: {
-        'idle cash': excessCash,
-        'liquid savings': profile.liquidSavings,
-        'emergency fund target': cashflow.emergencyFundTarget,
-        'cash return': assumptions.expectedReturns.cash,
+        ...(lumpIsIdle
+          ? {
+              'idle cash': excessCash,
+              'liquid savings': profile.liquidSavings,
+              'emergency fund target': cashflow.emergencyFundTarget,
+              'cash return': assumptions.expectedReturns.cash,
+              'value forgone': lumpGain,
+            }
+          : {}),
+        ...(flowIsIdle
+          ? { 'monthly surplus': cashflow.monthlySurplus, 'corpus built': flowValue }
+          : {}),
         'invested return': expectedReturn,
         inflation: assumptions.inflationPct,
-        'value forgone': invested - inCash,
+        'horizon years': years,
       },
       apply: { type: 'set_allocation', weights: ctx.recommendedAllocation },
     });
   }
 
-  /* 6. Allocation mismatch against the risk profile. ------------------------- */
+  /* 6. One portfolio-shape action: target mix, concentration and drift. -------
+   *
+   * These were three rules. They fired together constantly and read as three
+   * ways of saying "your portfolio is not the shape you agreed to", which is
+   * one decision and one trip to the broker. Merged, the *signals* are all still
+   * reported - each one that fires contributes its own reason, steps, evidence
+   * and priority - so nothing is hidden, only un-duplicated.
+   */
   const currentEquity =
     (portfolio.weights.equity_domestic ?? 0) +
     (portfolio.weights.equity_international ?? 0) +
@@ -490,134 +567,164 @@ export function generateActions(ctx: ActionContext): NextBestAction[] {
     (ctx.recommendedAllocation.equity_international ?? 0) +
     (ctx.recommendedAllocation.reit ?? 0);
   const equityGap = targetEquity - currentEquity;
-  if (Math.abs(equityGap) > 0.1) {
+
+  const misaligned = Math.abs(equityGap) > 0.1;
+  const concentrated = !!portfolio.largestSingleSecurity && portfolio.largestSingleSecurity.weight > 0.15;
+  const drifted = portfolio.totalDriftPct > 10;
+
+  if (misaligned || concentrated || drifted) {
     const tooLow = equityGap > 0;
     const returnDelta = Math.abs(
-      (targetEquity - currentEquity) *
-        (assumptions.expectedReturns.equity_domestic - assumptions.expectedReturns.debt),
+      equityGap * (assumptions.expectedReturns.equity_domestic - assumptions.expectedReturns.debt),
     );
-    actions.push({
-      id: 'align-allocation',
-      title: tooLow
-        ? `Raise equity from ${(currentEquity * 100).toFixed(0)}% to ${(targetEquity * 100).toFixed(0)}%`
-        : `Reduce equity from ${(currentEquity * 100).toFixed(0)}% to ${(targetEquity * 100).toFixed(0)}%`,
-      category: 'investing',
-      why: tooLow
-        ? `Your ${risk.bucket} profile and ${retirement.yearsToRetirement}-year horizon support more growth assets than you hold. Being under-invested in equity is a real cost, not a safe choice, over this timeframe.`
-        : `You hold more equity than your ${risk.bucket} profile supports. With ${retirement.yearsToRetirement} years to retirement, a deep drawdown at the wrong moment would be difficult to recover from.`,
-      impact: {
-        metric: tooLow ? 'Expected return added' : 'Volatility removed',
-        value: round(returnDelta * 100, 2),
-        unit: 'percent',
-      },
-      effort: 'medium',
-      priorityScore: clamp(50 + Math.abs(equityGap) * 100, 50, 85),
-      steps: [
-        `Shift roughly ${fmt(Math.abs(equityGap) * portfolio.totalValue)} ${tooLow ? 'into' : 'out of'} equity.`,
-        'Do it with new contributions first - that avoids triggering capital gains.',
-        'Spread any large switch over a few months.',
-      ],
-      assumptions: [
-        {
-          label: 'Risk assessment',
-          value: `${risk.bucket} - tolerance ${risk.toleranceScore}/100, capacity ${risk.capacityScore}/100`,
-          source: 'derived',
-        },
-        {
-          label: 'Glide path',
-          value: `Model portfolio for ${risk.bucket}, de-risked for a ${retirement.yearsToRetirement}-year horizon`,
-          source: 'model_default',
-        },
-      ],
-      evidence: {
-        'current equity share': currentEquity,
-        'target equity share': targetEquity,
-        'equity gap': Math.abs(equityGap),
-        'amount to shift': Math.abs(equityGap) * portfolio.totalValue,
-        'return impact': returnDelta,
-      },
-      apply: { type: 'set_allocation', weights: ctx.recommendedAllocation },
-    });
-  }
-
-  /* 7. Single-name concentration - securities only, never funds or deposits. -- */
-  if (portfolio.largestSingleSecurity && portfolio.largestSingleSecurity.weight > 0.15) {
-    const weight = portfolio.largestSingleSecurity.weight;
+    const concentration = portfolio.largestSingleSecurity;
     const trimTo = 0.1;
-    actions.push({
-      id: 'reduce-concentration',
-      title: `Trim ${portfolio.largestSingleSecurity.name} from ${(weight * 100).toFixed(0)}% to ${(trimTo * 100).toFixed(0)}%`,
-      category: 'investing',
-      why: `One individual security is ${(weight * 100).toFixed(0)}% of your invested assets. That is company-specific risk you are not compensated for - if it falls 50%, your whole portfolio drops ${(weight * 50).toFixed(0)}%, and a diversified fund would have given you the same expected return without it.`,
-      impact: {
-        metric: 'Single-name exposure reduced',
-        value: round((weight - trimTo) * 100, 1),
-        unit: 'percent',
-      },
-      effort: 'medium',
-      priorityScore: clamp(48 + (weight - 0.15) * 160, 48, 88),
-      steps: [
-        `Sell down to ${(trimTo * 100).toFixed(0)}% and spread the proceeds across a broad index fund.`,
-        'Stagger the sales across tax years if the gains are large.',
-        'If it is employer stock, remember your salary is already exposed to the same company - a bad year hits your income and your portfolio together.',
-      ],
-      assumptions: [
-        {
-          label: 'Concentration measure',
-          value: `Largest single security is ${(weight * 100).toFixed(1)}% of invested assets; ${portfolio.effectivePositions} effective positions across ${profile.holdings.length} holdings`,
-          source: 'derived',
-        },
-        {
-          label: 'Comfort threshold',
-          value: 'No single security above 10-15% of invested assets. Funds and provident-fund balances are excluded - they are diversified internally.',
-          source: 'model_default',
-        },
-      ],
-      evidence: {
-        'largest single security weight': weight,
-        'target weight': trimTo,
-        'portfolio drop if it halves': weight * 0.5,
-        'effective positions': portfolio.effectivePositions,
-      },
-    });
-  }
-
-  /* 8. Drift. ---------------------------------------------------------------- */
-  if (portfolio.totalDriftPct > 10) {
-    const biggest = portfolio.drift
+    const biggestDrift = portfolio.drift
       .slice()
       .sort((a, b) => Math.abs(b.deltaPct) - Math.abs(a.deltaPct))[0];
+
+    // The headline names whichever signal is largest, so the title still says
+    // something specific rather than a generic "review your portfolio".
+    const title = concentrated
+      ? `Trim ${concentration!.name} from ${(concentration!.weight * 100).toFixed(0)}% and realign your mix`
+      : misaligned
+        ? tooLow
+          ? `Raise equity from ${(currentEquity * 100).toFixed(0)}% to ${(targetEquity * 100).toFixed(0)}%`
+          : `Reduce equity from ${(currentEquity * 100).toFixed(0)}% to ${(targetEquity * 100).toFixed(0)}%`
+        : `Rebalance - ${portfolio.totalDriftPct.toFixed(0)}% of your portfolio is out of position`;
+
+    const why = [
+      misaligned
+        ? tooLow
+          ? `Your ${risk.bucket} profile and ${retirement.yearsToRetirement}-year horizon support more growth assets than you hold. Being under-invested in equity is a real cost, not a safe choice, over this timeframe.`
+          : `You hold more equity than your ${risk.bucket} profile supports. With ${retirement.yearsToRetirement} years to retirement, a deep drawdown at the wrong moment would be difficult to recover from.`
+        : '',
+      concentrated
+        ? `One individual security is ${(concentration!.weight * 100).toFixed(0)}% of your invested assets. That is company-specific risk you are not compensated for - if it falls 50%, your whole portfolio drops ${(concentration!.weight * 50).toFixed(0)}%.`
+        : '',
+      drifted
+        ? `${biggestDrift ? `${ASSET_LABELS[biggestDrift.assetClass]} is ${(Math.abs(biggestDrift.deltaPct) * 100).toFixed(0)} points ${biggestDrift.deltaPct > 0 ? 'above' : 'below'} target. ` : ''}Drift means your actual risk no longer matches the plan you agreed to - usually because the winners grew into an oversized share.`
+        : '',
+    ]
+      .filter(Boolean)
+      .join(' ');
+
+    // Percent of the portfolio that should change hands, taking whichever
+    // signal asks for the most movement.
+    const shareToMove = Math.max(
+      misaligned ? Math.abs(equityGap) * 100 : 0,
+      concentrated ? (concentration!.weight - trimTo) * 100 : 0,
+      drifted ? portfolio.totalDriftPct : 0,
+    );
+
     actions.push({
       id: 'rebalance-portfolio',
-      title: `Rebalance - ${portfolio.totalDriftPct.toFixed(0)}% of your portfolio is out of position`,
-      category: 'efficiency',
-      why: `${biggest ? `${ASSET_LABELS[biggest.assetClass]} is ${(Math.abs(biggest.deltaPct) * 100).toFixed(0)} points ${biggest.deltaPct > 0 ? 'above' : 'below'} target. ` : ''}Drift means your actual risk no longer matches the plan you agreed to - usually because the winners grew into an oversized share.`,
-      impact: { metric: 'Share of portfolio realigned', value: portfolio.totalDriftPct, unit: 'percent' },
-      effort: 'low',
-      priorityScore: clamp(40 + portfolio.totalDriftPct, 40, 78),
+      title,
+      category: 'investing',
+      why,
+      impact: {
+        metric: 'Share of portfolio to realign',
+        value: round(shareToMove, 1),
+        unit: 'percent',
+      },
+      effort: concentrated || misaligned ? 'medium' : 'low',
+      priorityScore: Math.max(
+        misaligned ? clamp(50 + Math.abs(equityGap) * 100, 50, 85) : 0,
+        concentrated ? clamp(48 + (concentration!.weight - 0.15) * 160, 48, 88) : 0,
+        drifted ? clamp(40 + portfolio.totalDriftPct, 40, 78) : 0,
+      ),
       steps: [
-        ...portfolio.rebalanceTrades
-          .slice(0, 4)
-          .map((t) => `${t.action === 'buy' ? 'Buy' : 'Sell'} ${fmt(t.amount)} of ${ASSET_LABELS[t.assetClass]}.`),
+        ...(concentrated
+          ? [
+              `Sell ${concentration!.name} down to ${(trimTo * 100).toFixed(0)}% and spread the proceeds across a broad index fund.`,
+              'If it is employer stock, remember your salary is already exposed to the same company - a bad year hits your income and your portfolio together.',
+            ]
+          : []),
+        ...(misaligned
+          ? [
+              `Shift roughly ${fmt(Math.abs(equityGap) * portfolio.totalValue)} ${tooLow ? 'into' : 'out of'} equity.`,
+            ]
+          : []),
+        ...(drifted
+          ? portfolio.rebalanceTrades
+              .slice(0, 3)
+              .map((t) => `${t.action === 'buy' ? 'Buy' : 'Sell'} ${fmt(t.amount)} of ${ASSET_LABELS[t.assetClass]}.`)
+          : []),
+        'Do it with new contributions first - that avoids triggering capital gains.',
         'Rebalance once or twice a year, or when any class drifts more than 5 points - not on every wobble.',
       ],
       assumptions: [
+        ...(misaligned
+          ? [
+              {
+                label: 'Risk assessment',
+                value: `${risk.bucket} - tolerance ${risk.toleranceScore}/100, capacity ${risk.capacityScore}/100`,
+                source: 'derived' as const,
+              },
+              {
+                label: 'Glide path',
+                value: `Model portfolio for ${risk.bucket}, de-risked for a ${retirement.yearsToRetirement}-year horizon`,
+                source: 'model_default' as const,
+              },
+            ]
+          : []),
+        ...(concentrated
+          ? [
+              {
+                label: 'Concentration measure',
+                value: `Largest single security is ${(concentration!.weight * 100).toFixed(1)}% of invested assets; ${portfolio.effectivePositions} effective positions across ${profile.holdings.length} holdings. Funds and provident-fund balances are excluded - they are diversified internally.`,
+                source: 'derived' as const,
+              },
+            ]
+          : []),
+        ...(drifted
+          ? [
+              {
+                label: 'Drift measure',
+                value:
+                  'Half the sum of absolute differences from target - i.e. the share of the portfolio that has to change hands, which cannot exceed 100%',
+                source: 'model_default' as const,
+              },
+            ]
+          : []),
         {
-          label: 'Drift measure',
-          value:
-            'Half the sum of absolute differences from target - i.e. the share of the portfolio that has to change hands, which cannot exceed 100%',
-          source: 'model_default',
+          label: 'Not modelled',
+          value: 'Transaction costs, exit loads and capital gains tax',
+          source: 'model_default' as const,
         },
-        { label: 'Not modelled', value: 'Transaction costs, exit loads and capital gains tax', source: 'model_default' },
       ],
       evidence: {
-        'total drift': portfolio.totalDriftPct,
-        ...(biggest ? { 'largest class drift': Math.abs(biggest.deltaPct) } : {}),
-        ...Object.fromEntries(
-          portfolio.rebalanceTrades.slice(0, 4).map((t) => [`${t.action} ${t.assetClass}`, t.amount]),
-        ),
+        ...(misaligned
+          ? {
+              'current equity share': currentEquity,
+              'target equity share': targetEquity,
+              'equity gap': Math.abs(equityGap),
+              'amount to shift': Math.abs(equityGap) * portfolio.totalValue,
+              'return impact': returnDelta,
+            }
+          : {}),
+        ...(concentrated
+          ? {
+              'largest single security weight': concentration!.weight,
+              'target weight': trimTo,
+              'portfolio drop if it halves': concentration!.weight * 0.5,
+              'effective positions': portfolio.effectivePositions,
+            }
+          : {}),
+        ...(drifted
+          ? {
+              'total drift': portfolio.totalDriftPct,
+              ...(biggestDrift ? { 'largest class drift': Math.abs(biggestDrift.deltaPct) } : {}),
+              ...Object.fromEntries(
+                portfolio.rebalanceTrades.slice(0, 3).map((t) => [`${t.action} ${t.assetClass}`, t.amount]),
+              ),
+            }
+          : {}),
+        'share to realign': shareToMove,
       },
-      apply: { type: 'rebalance_to_target' },
+      // Drift has an exact set of trades to make; the other two signals are a
+      // change of target, so they apply the recommended mix instead.
+      apply: drifted ? { type: 'rebalance_to_target' } : { type: 'set_allocation', weights: ctx.recommendedAllocation },
     });
   }
 
@@ -737,36 +844,6 @@ export function generateActions(ctx: ActionContext): NextBestAction[] {
         'retirement annual spend': retirement.targetAnnualSpend,
         'retirement readiness': retirement.readinessRatio,
         ...(retirement.depletionAge ? { 'depletion age': retirement.depletionAge } : {}),
-      },
-    });
-  }
-
-  /* 12. Unallocated surplus. ------------------------------------------------- */
-  if (cashflow.monthlySurplus > cashflow.monthlyIncome * 0.05 && !expensiveDebts.length && cashflow.emergencyFundGap === 0) {
-    const years = Math.max(5, retirement.yearsToRetirement);
-    const value = cashflow.monthlySurplus * stepFactor(expectedReturn, years, 0.05);
-    actions.push({
-      id: 'automate-surplus',
-      title: `Automate ${fmt(cashflow.monthlySurplus)}/month of unallocated surplus`,
-      category: 'savings',
-      why: `You have ${fmt(cashflow.monthlySurplus)} a month that is not committed to any goal. Money without a job tends to get spent - automating it on payday removes the decision.`,
-      impact: { metric: `Corpus built in ${years} years`, value: round(value, 0), unit: currencyUnit },
-      effort: 'low',
-      priorityScore: 52,
-      steps: [
-        `Set up an automatic monthly investment of ${fmt(cashflow.monthlySurplus)} dated for the day after payday.`,
-        `Invest it in your ${risk.bucket} target mix.`,
-        'Attach it to a named goal - funded goals get abandoned far less often than "investing in general".',
-      ],
-      assumptions: [
-        { label: 'Surplus', value: `${fmt(cashflow.monthlySurplus)}/month after expenses, EMIs and existing goals`, source: 'derived' },
-        { label: 'Projection', value: `${(expectedReturn * 100).toFixed(1)}%/yr with a 5% annual step-up over ${years} years`, source: 'derived' },
-      ],
-      evidence: {
-        'monthly surplus': cashflow.monthlySurplus,
-        'corpus built': value,
-        'horizon years': years,
-        'assumed return': expectedReturn,
       },
     });
   }

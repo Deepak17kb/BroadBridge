@@ -23,7 +23,7 @@ import { round } from './finance/math.js';
  * Two rules keep the number honest:
  *
  *  1. **Only actions the platform can actually carry out are counted.** Four of
- *     the fifteen rules carry a machine-applicable mutation. The other eleven
+ *     the twelve rules carry a machine-applicable mutation. The other eight
  *     recommend buying a policy, refinancing a loan or opening an account - real
  *     value, but not value this calculation can claim. They are returned
  *     separately as `notModelled` so the headline cannot quietly absorb them.

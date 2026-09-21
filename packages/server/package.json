@@ -5,10 +5,10 @@
   "type": "module",
   "main": "dist/index.js",
   "scripts": {
-    "dev": "tsx watch src/index.ts",
+    "dev": "tsx watch --env-file-if-exists=../../.env src/index.ts",
     "start": "node dist/index.js",
     "build": "tsup",
-    "test": "node --import tsx --test test/api.test.ts test/agent.test.ts",
+    "test": "node --import tsx --test test/api.test.ts test/agent.test.ts test/groq.test.ts test/sse.test.ts",
     "typecheck": "tsc --noEmit -p ."
   },
   "dependencies": {

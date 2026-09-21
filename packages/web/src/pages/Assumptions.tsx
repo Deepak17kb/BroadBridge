@@ -27,6 +27,7 @@ export function Assumptions() {
   const { profile, snapshot } = useLoadedProfile();
   const { updateProfile, saveState } = useProfile();
   const { currency } = profile;
+
   const assumptions = snapshot.assumptions;
 
   const [knowledge, setKnowledge] = useState<{ id: string; title: string; tags: string[] }[]>([]);
@@ -233,6 +234,62 @@ export function Assumptions() {
           />
         </Card>
       )}
+
+      <Card
+        title="How your goals compete"
+        subtitle="When the goals need more than you have, these decide who gets funded first"
+      >
+        <p className="text-sm text-muted">
+          Each goal is scored <span className="num">priority × urgency × deficit</span>, where
+          urgency is <span className="num">1 / years to the goal</span> and deficit is how far from
+          funded it is. The weights below are the priority half of that, and they are yours: raise
+          the aspirational weight and a nice-to-have really will take money from a must-have. The
+          split this produces is on the Goals page, with what it costs the goals that lose.
+        </p>
+        <div className="grid grid-2" style={{ marginTop: 12 }}>
+          <div className="stack">
+            <Slider
+              label={`Must-have weight ${isOverridden('goalWeightMustHave') ? '(yours)' : '(house view)'}`}
+              value={assumptions.goalWeightMustHave}
+              min={0}
+              max={5}
+              step={0.1}
+              onChange={(v) => setAssumption((a) => void (a.goalWeightMustHave = v))}
+              format={(v) => `${v.toFixed(1)}x`}
+            />
+            <Slider
+              label={`Important weight ${isOverridden('goalWeightImportant') ? '(yours)' : '(house view)'}`}
+              value={assumptions.goalWeightImportant}
+              min={0}
+              max={5}
+              step={0.1}
+              onChange={(v) => setAssumption((a) => void (a.goalWeightImportant = v))}
+              format={(v) => `${v.toFixed(1)}x`}
+            />
+            <Slider
+              label={`Aspirational weight ${isOverridden('goalWeightAspirational') ? '(yours)' : '(house view)'}`}
+              value={assumptions.goalWeightAspirational}
+              min={0}
+              max={5}
+              step={0.1}
+              onChange={(v) => setAssumption((a) => void (a.goalWeightAspirational = v))}
+              format={(v) => `${v.toFixed(1)}x`}
+            />
+          </div>
+          <div className="stack">
+            <Slider
+              label={`Near-term window ${isOverridden('nearTermGoalMonths') ? '(yours)' : '(house view)'}`}
+              value={assumptions.nearTermGoalMonths}
+              min={0}
+              max={60}
+              step={3}
+              onChange={(v) => setAssumption((a) => void (a.nearTermGoalMonths = v))}
+              format={(v) => (v === 0 ? 'Off' : `${v} months`)}
+              hint="A goal this close funds before longer-horizon goals of the same priority, whatever the score — there is no compounding left to rescue it."
+            />
+          </div>
+        </div>
+      </Card>
 
       <Card
         title="Protection"

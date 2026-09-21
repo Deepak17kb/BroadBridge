@@ -64,6 +64,12 @@ const ENGINE_LABEL: Record<HealthInfo['engine'], { text: string; tone: string; t
     tone: 'badge-info',
     title: 'Reasoning runs on Claude via the Anthropic API.',
   },
+  groq: {
+    text: 'Groq',
+    tone: 'badge-info',
+    title:
+      'Reasoning runs on an open-weights model hosted by Groq. The tools, the finance engine and the grounding check are the same on every engine - only the wording changes.',
+  },
   deterministic: {
     text: 'Deterministic engine',
     tone: 'badge-warning',
@@ -73,7 +79,7 @@ const ENGINE_LABEL: Record<HealthInfo['engine'], { text: string; tone: string; t
 };
 
 export function Shell({ children, title }: { children: ReactNode; title: string }) {
-  const { profile, snapshot, theme, toggleTheme, saveState, switchCurrency, reset } = useProfile();
+  const { profile, snapshot, theme, toggleTheme, saveState, reset } = useProfile();
   const [health, setHealth] = useState<HealthInfo | null>(null);
   const [navOpen, setNavOpen] = useState(false);
   const location = useLocation();
@@ -180,20 +186,6 @@ export function Shell({ children, title }: { children: ReactNode; title: string 
             </span>
           )}
 
-          {profile && (
-            <div className="switch" role="group" aria-label="Display currency">
-              {(['INR', 'USD'] as const).map((c) => (
-                <button
-                  key={c}
-                  aria-pressed={profile.currency === c}
-                  onClick={() => switchCurrency(c)}
-                  title={`Show amounts in ${c}${c === 'USD' ? ' (converted at an illustrative fixed rate)' : ''}`}
-                >
-                  {c === 'INR' ? '₹ INR' : '$ USD'}
-                </button>
-              ))}
-            </div>
-          )}
 
           <button
             className="btn btn-icon btn-ghost"

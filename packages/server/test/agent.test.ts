@@ -4,9 +4,10 @@ import type { Server } from 'node:http';
 import type { AddressInfo } from 'node:net';
 import { PERSONAS } from '@wealth/shared';
 import { createApp } from '../src/app.js';
-import { classifyIntent, heuristicPlan, inferLevers } from '../src/agent/intent.js';
+import { classifyIntent, heuristicPlan, inferLevers, type Intent } from '../src/agent/intent.js';
 import { retrieve } from '../src/agent/knowledge/retriever.js';
-import { executeTool } from '../src/agent/tools.js';
+import { executeTool, toolSchemas } from '../src/agent/tools.js';
+import { offeredTools } from '../src/agent/orchestrator.js';
 import { extractClaims, groundingRatio, verifyAnswer } from '../src/agent/verifier.js';
 
 /**
@@ -234,6 +235,83 @@ test('the verifier tolerates prose rounding but not invention', () => {
 });
 
 /* -------------------------------------------------------------------------- */
+/* Tool scoping                                                                */
+/* -------------------------------------------------------------------------- */
+
+/**
+ * The whole tool catalogue is re-sent on every step of the agent loop, so on a
+ * provider metered by tokens per minute the schemas are what runs the allowance
+ * out - a full catalogue costs roughly four times a plan-scoped one, and three
+ * steps of that exhausted a free Groq minute before the answer was written.
+ * These tests pin the properties that make narrowing safe.
+ *
+ * Spelling the intents out as a `Record<Intent, true>` rather than a list makes
+ * the compiler fail here when a new intent is added, so a plan that has never
+ * been checked against the offered set cannot reach production quietly.
+ */
+const EVERY_INTENT: Record<Intent, true> = {
+  overview: true,
+  goal: true,
+  whatif: true,
+  portfolio: true,
+  actions: true,
+  debt: true,
+  probability: true,
+  education: true,
+  update: true,
+  compare: true,
+};
+const INTENTS = Object.keys(EVERY_INTENT) as Intent[];
+
+test('toolSchemas narrows to the named tools and ignores unknown names', () => {
+  const all = toolSchemas();
+  assert.ok(all.length > 8, 'expected a catalogue worth narrowing');
+
+  const narrowed = toolSchemas(['get_financial_snapshot', 'search_knowledge', 'synthesize']);
+  assert.deepEqual(
+    narrowed.map((t) => t.name).sort(),
+    ['get_financial_snapshot', 'search_knowledge'],
+    'synthesize names no tool and must not appear',
+  );
+
+  assert.equal(toolSchemas([]).length, 0);
+  assert.equal(toolSchemas().length, all.length, 'an absent filter still means everything');
+});
+
+test('every tool a plan names actually exists', () => {
+  const known = new Set(toolSchemas().map((t) => t.name));
+  for (const intent of INTENTS) {
+    for (const planStep of heuristicPlan(intent)) {
+      if (planStep.tool === 'synthesize') continue;
+      assert.ok(known.has(planStep.tool), `${intent} plans a missing tool: ${planStep.tool}`);
+    }
+  }
+});
+
+test('the offered set covers the plan, keeps the escape hatches, and stays small', () => {
+  const full = toolSchemas().length;
+  for (const intent of INTENTS) {
+    const plan = heuristicPlan(intent);
+    const offered = new Set(offeredTools(plan, 'plan').map((t) => t.name));
+
+    for (const planStep of plan) {
+      if (planStep.tool === 'synthesize') continue;
+      assert.ok(offered.has(planStep.tool), `${intent} cannot reach its own ${planStep.tool}`);
+    }
+    // Rule 2 of the system prompt obliges a snapshot read, and grounding an
+    // explanation is always in bounds - neither may depend on the plan.
+    assert.ok(offered.has('get_financial_snapshot'), `${intent} lost the snapshot tool`);
+    assert.ok(offered.has('search_knowledge'), `${intent} lost the knowledge tool`);
+    // If this ever stops holding, narrowing has stopped paying for itself.
+    assert.ok(offered.size <= full / 2, `${intent} offers ${offered.size} of ${full} tools`);
+
+    // A provider that is not metered per minute keeps the whole catalogue, so
+    // narrowing can never quietly become the only behaviour.
+    assert.equal(offeredTools(plan, 'all').length, full);
+  }
+});
+
+/* -------------------------------------------------------------------------- */
 /* End-to-end agent                                                            */
 /* -------------------------------------------------------------------------- */
 
@@ -340,6 +418,35 @@ test('conversation history is persisted and replayable', async () => {
 
   const sessions = await json(await fetch(`${baseUrl}/api/agent/${profileId}/sessions`));
   assert.ok(sessions.some((s: { id: string }) => s.id === sessionId));
+});
+
+test('a goal question makes the agent weigh the goals against each other', async () => {
+  // Reporting each goal's gap in isolation is the failure mode this tool exists
+  // to prevent: Meera's separate gaps add up to far more than she earns.
+  const profileId = await seedProfile('meera');
+  const { message } = await ask(profileId, 'Am I on track for my education goal?');
+
+  assert.ok(
+    message.toolCalls.some((t: { tool: string }) => t.tool === 'optimise_goal_funding'),
+    `expected the optimiser to run, got ${message.toolCalls.map((t: { tool: string }) => t.tool).join(', ')}`,
+  );
+
+  // Whatever it says about the split has to be checkable like everything else.
+  const checks = message.verification ?? [];
+  const grounded = checks.filter((c: { status: string }) => c.status === 'grounded').length;
+  if (checks.length) {
+    assert.ok(
+      grounded / checks.length >= 0.95,
+      `answer was not grounded: ${JSON.stringify(checks.filter((c: { status: string }) => c.status !== 'grounded'))}`,
+    );
+  }
+});
+
+test('the optimiser is advertised in the agent capabilities', async () => {
+  const caps = await json(await fetch(`${baseUrl}/api/agent/capabilities`));
+  const tool = caps.tools.find((t: { name: string }) => t.name === 'optimise_goal_funding');
+  assert.ok(tool, 'the tool is registered');
+  assert.match(tool.description, /years of delay/i, 'and says what it reports');
 });
 
 test('a stored conversation carries its own reasoning trace', async () => {

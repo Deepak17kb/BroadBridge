@@ -1,15 +1,33 @@
 import Anthropic from '@anthropic-ai/sdk';
 import { bedrockModelId, config, type LlmProvider } from '../config.js';
 import { logger } from '../lib/logger.js';
+import {
+  GroqStreamAccumulator,
+  type GroqUsage,
+  parseSseStream,
+  retryDelayMs,
+  sleep,
+  toAnthropicMessage,
+  toGroqPayload,
+} from './groq.js';
+
+/** Matches the `maxRetries: 2` the Anthropic SDK applies on the other paths. */
+const GROQ_MAX_RETRIES = 2;
 
 /**
- * One interface over three ways of reaching Claude.
+ * One interface over every way of reaching a model.
  *
  * `bedrock` is what the deployed stack uses - the Lambda's execution role
  * carries the Bedrock permission, so there is no API key to store or rotate
  * anywhere in the system. `anthropic` is the convenient local path. Both go
  * through the official SDK, so tool-use shapes, streaming and error types are
  * identical and the orchestrator does not branch on provider.
+ *
+ * `groq` reaches open-weights models over an OpenAI-compatible endpoint, so it
+ * is the one provider whose wire format differs. `groq.ts` absorbs that
+ * difference and returns the same `Anthropic.Message`, which is what keeps the
+ * orchestrator free of provider branching. The model still only narrates: the
+ * tools, the engine and the grounding verifier are identical on every path.
  */
 
 export interface LlmClient {
@@ -109,6 +127,157 @@ class BedrockClient implements LlmClient {
   }
 }
 
+/** A Groq HTTP failure, carrying the status so the UI can say something useful. */
+export class GroqApiError extends Error {
+  constructor(
+    readonly status: number,
+    message: string,
+  ) {
+    super(message);
+    this.name = 'GroqApiError';
+  }
+}
+
+/** Groq reports failures as `{ error: { message } }`; fall back to the raw body. */
+function describeGroqFailure(status: number, body: string): string {
+  try {
+    const parsed = JSON.parse(body) as { error?: { message?: string } };
+    if (parsed.error?.message) return parsed.error.message;
+  } catch {
+    /* not JSON - the status and the raw text are all there is */
+  }
+  return body.trim().slice(0, 200) || `Groq returned HTTP ${status}`;
+}
+
+class GroqClient implements LlmClient {
+  readonly provider = 'groq' as const;
+  readonly model: string;
+
+  constructor(
+    private readonly apiKey: string,
+    model: string,
+    private readonly baseUrl: string,
+  ) {
+    this.model = model;
+  }
+
+  /**
+   * Retries transient failures before giving up, which is what the Anthropic
+   * path already gets for free from `maxRetries: 2` in the SDK. Without it the
+   * Groq path was the least resilient of the three, and a token allowance that
+   * refills a second later would end the turn.
+   *
+   * Retrying here rather than around the whole call is deliberate: this runs
+   * before the response body is touched, so no tokens have streamed yet and a
+   * retry cannot duplicate text in the user's answer.
+   */
+  private async post(params: LlmRequest, stream: boolean): Promise<Response> {
+    const body = JSON.stringify(toGroqPayload(params, this.model, stream, config.groqMaxTokens));
+    let spentMs = 0;
+
+    for (let attempt = 0; ; attempt += 1) {
+      const response = await fetch(`${this.baseUrl}/chat/completions`, {
+        method: 'POST',
+        headers: {
+          Authorization: `Bearer ${this.apiKey}`,
+          'Content-Type': 'application/json',
+        },
+        body,
+        // The SDK paths get their timeout from the client; this one needs it
+        // here, or a stalled stream would hold an SSE connection open forever.
+        signal: AbortSignal.timeout(config.requestTimeoutMs),
+      });
+
+      if (response.ok) return response;
+
+      const text = await response.text().catch(() => '');
+      const detail = describeGroqFailure(response.status, text);
+      const wait = retryDelayMs({
+        status: response.status,
+        retryAfter: response.headers.get('retry-after'),
+        detail,
+        attempt,
+        maxRetries: GROQ_MAX_RETRIES,
+        spentMs,
+        budgetMs: config.groqRetryBudgetMs,
+      });
+
+      // The user-facing wording is deliberately generic, so the operator's copy
+      // of the reason - which names the actual quota - is logged here or lost.
+      logger.warn('groq request failed', {
+        status: response.status,
+        model: this.model,
+        detail,
+        limitTokens: response.headers.get('x-ratelimit-limit-tokens'),
+        remainingTokens: response.headers.get('x-ratelimit-remaining-tokens'),
+        retryInMs: wait,
+      });
+
+      if (wait === null) throw new GroqApiError(response.status, detail);
+      spentMs += wait;
+      await sleep(wait);
+    }
+  }
+
+  /**
+   * Groq meters a free account on tokens *per minute*, and the agent loop spends
+   * that allowance several calls at a time, so when a run falls back to the
+   * deterministic engine the only useful question is which call was expensive.
+   * Recording it per call answers that without a reproduction.
+   */
+  private meter(usage: GroqUsage | undefined): void {
+    logger.debug('groq call metered', {
+      model: this.model,
+      promptTokens: usage?.prompt_tokens ?? 0,
+      completionTokens: usage?.completion_tokens ?? 0,
+    });
+  }
+
+  async createMessage(params: LlmRequest): Promise<Anthropic.Message> {
+    const response = await this.post(params, false);
+    const json = (await response.json()) as Record<string, any>;
+    const choice = json.choices?.[0];
+    this.meter(json.usage as GroqUsage | undefined);
+    return toAnthropicMessage({
+      id: typeof json.id === 'string' ? json.id : 'groq-message',
+      model: typeof json.model === 'string' ? json.model : this.model,
+      text: choice?.message?.content ?? '',
+      toolCalls: choice?.message?.tool_calls ?? [],
+      finishReason: choice?.finish_reason,
+      usage: json.usage,
+    });
+  }
+
+  async streamText(
+    params: LlmRequest,
+    onDelta: (text: string) => void,
+  ): Promise<Anthropic.Message> {
+    const response = await this.post(params, true);
+    if (!response.body) {
+      throw new GroqApiError(502, 'Groq returned a streaming response with no body');
+    }
+
+    const accumulator = new GroqStreamAccumulator();
+    for await (const chunk of parseSseStream(response.body)) {
+      // `accept` returns only the user-visible text. gpt-oss streams its chain
+      // of thought in a sibling field, and forwarding that would print the
+      // model's private reasoning into the answer.
+      const text = accumulator.accept(chunk);
+      if (text) onDelta(text);
+    }
+
+    this.meter(accumulator.usage);
+    return toAnthropicMessage({
+      id: accumulator.id || 'groq-message',
+      model: this.model,
+      text: accumulator.text,
+      toolCalls: accumulator.toolCalls(),
+      finishReason: accumulator.finishReason,
+      usage: accumulator.usage,
+    });
+  }
+}
+
 let cached: LlmClient | null | undefined;
 
 /**
@@ -143,6 +312,18 @@ export async function getLlm(): Promise<LlmClient | null> {
       return cached;
     }
 
+    if (config.provider === 'groq') {
+      const apiKey = process.env.GROQ_API_KEY;
+      if (!apiKey) throw new Error('provider is groq but GROQ_API_KEY is not set');
+      logger.info('LLM ready', {
+        provider: 'groq',
+        model: config.groqModel,
+        endpoint: config.groqBaseUrl,
+      });
+      cached = new GroqClient(apiKey, config.groqModel, config.groqBaseUrl);
+      return cached;
+    }
+
     const client = buildClient();
     if (!client) throw new Error('no Anthropic credentials resolved');
     logger.info('LLM ready', { provider: 'anthropic', model: config.model });
@@ -165,10 +346,33 @@ export function resetLlm(): void {
   cached = undefined;
 }
 
-/** Narrows an SDK error into something worth showing a user. */
+/**
+ * Narrows an error into something worth showing a user.
+ *
+ * Everything here is terminal. Retries - the SDK’s on the Anthropic and
+ * Bedrock paths, this module’s own on the Groq one - are already spent by the
+ * time a failure reaches this function, and the caller’s next move is the
+ * deterministic engine. So the copy must not promise a retry that will never
+ * happen; it says what is actually about to occur.
+ */
 export function describeLlmError(error: unknown): { message: string; recoverable: boolean } {
+  // Groq speaks HTTP rather than the SDK's error classes, so it is narrowed on
+  // status. The wording matches the Anthropic branches below on purpose: which
+  // provider is configured is not the user's problem.
+  if (error instanceof GroqApiError) {
+    if (error.status === 429) {
+      return { message: 'The reasoning service is rate limited. Answering with the deterministic engine instead.', recoverable: true };
+    }
+    if (error.status === 401 || error.status === 403) {
+      return { message: 'Reasoning service credentials were rejected.', recoverable: false };
+    }
+    if (error.status >= 500) {
+      return { message: `Reasoning service error (${error.status}).`, recoverable: true };
+    }
+    return { message: `Reasoning request was rejected: ${error.message}`, recoverable: false };
+  }
   if (error instanceof Anthropic.RateLimitError) {
-    return { message: 'The reasoning service is rate limited. Retrying shortly.', recoverable: true };
+    return { message: 'The reasoning service is rate limited. Answering with the deterministic engine instead.', recoverable: true };
   }
   if (error instanceof Anthropic.AuthenticationError) {
     return { message: 'Reasoning service credentials were rejected.', recoverable: false };

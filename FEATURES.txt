@@ -1,8 +1,10 @@
 ================================================================================
 AI WEALTH NAVIGATOR - FEATURE & FUNCTIONALITY INVENTORY
 Generated 2026-09-20 by reading the source, not the docs.
-Verified state: npm test = 117/117 passing (shared 46, server 42, web 29).
-Size: ~16,700 lines of TypeScript/TSX across 4 workspaces.
+Revised 2026-09-21. Everything added since the first pass is in A10, and the
+counts below and throughout PART A have been corrected to match.
+Verified state: npm test = 183/183 passing (shared 79, server 75, web 29).
+Size: ~21,450 lines of TypeScript/TSX across 4 workspaces.
 ================================================================================
 
 HOW TO READ THIS FILE
@@ -23,7 +25,7 @@ A1. STACK AND SHAPE
   * @wealth/shared is imported as TypeScript SOURCE by both browser and server -
     one financial engine, no second implementation to drift
   * Runs with zero credentials (deterministic engine); optional Claude via the
-    Anthropic API or AWS Bedrock
+    Anthropic API or AWS Bedrock, or open-weights models via Groq
   * AWS CDK stack: CloudFront + S3 + HTTP API + Lambda (ARM64) + DynamoDB + Bedrock
 
 --------------------------------------------------------------------------------
@@ -103,7 +105,7 @@ A2. SCREENS (9 routes)
       not cover their own interest
 
   NEXT BEST ACTIONS
-    - 14 rule checks, ranked 0-100 by impact x urgency x confidence
+    - 12 rule checks, ranked 0-100 by impact x urgency x confidence
     - Each action carries: why (in the user's own numbers), quantified impact,
       effort level, ordered steps, the assumptions used, and evidence figures
     - "Apply to my plan" button that actually mutates the plan, for the 4
@@ -112,21 +114,21 @@ A2. SCREENS (9 routes)
     - Summary stats: actions identified, quantified upside, low-effort count, urgent
     - The ranking rule is published on the page
 
-    The 14 checks, in waterfall order:
-      1.  cover-interest-*     debt whose EMI is below its own monthly interest
-      2.  clear-expensive-debt highest-rate debt before any investing
-      3.  build-emergency-fund months of cover vs target
-      4.  close-life-cover-gap life insurance need vs cover held
-      5.  fund-goal-*          per off-track goal, the monthly gap
-      6.  deploy-idle-cash     cash beyond the emergency target
-      7.  align-allocation     current mix vs risk-appropriate mix
-      8.  reduce-concentration single security above threshold
-      9.  rebalance-portfolio  total drift above threshold
-      10. cut-fund-fees        blended expense ratio vs achievable
-      11. enable-step-up       contributions with no annual increase
-      12. close-retirement-gap monthly gap to the retirement corpus
-      13. automate-surplus     unallocated monthly surplus
-      14. use-tax-deduction    remaining tax-deductible investment room
+    The 12 checks, in waterfall order:
+      1.  cover-interest-*       debt whose EMI is below its own monthly interest
+      2.  clear-expensive-debt   highest-rate debt before any investing
+      3.  build-emergency-fund   months of cover vs target
+      4.  close-life-cover-gap   life insurance need vs cover held
+      5.  close-health-cover-gap health cover held vs the age/income/dependents target
+      6.  fund-goal-*            per off-track goal, the monthly gap
+      7.  deploy-surplus         idle cash beyond the emergency target and/or an
+                                 uncommitted monthly surplus (merged)
+      8.  rebalance-portfolio    target-mix misalignment, single-name concentration
+                                 and drift, reported together (merged)
+      9.  cut-fund-fees          blended expense ratio vs achievable
+      10. enable-step-up         contributions with no annual increase
+      11. close-retirement-gap   monthly gap to the retirement corpus
+      12. use-tax-deduction      remaining tax-deductible investment room
 
   AI ASSISTANT
     - Natural-language chat over the user's actual position
@@ -161,7 +163,8 @@ A2. SCREENS (9 routes)
   SHELL (all screens)
     - Grouped sidebar nav (Overview / Plan / Intelligence / Settings) with an
       urgent-action count badge
-    - Reasoning-engine badge: bedrock / anthropic / deterministic, with tooltip
+    - Reasoning-engine badge: bedrock / anthropic / groq / deterministic, with
+      tooltip, naming the model actually answering
     - INR <-> USD display currency switch
     - Dark/light theme toggle, persisted to localStorage
     - Mobile nav with backdrop; aria labels throughout
@@ -242,12 +245,12 @@ A4. THE AGENT (packages/server/src/agent)
   a tool result, and the verifier re-checks each number in the prose against the
   tool outputs. Unmatched figures are reported as unverified, not trusted.
 
-  12 tools, each returning summary (for the trace) + data (for UI cards) +
+  14 tools, each returning summary (for the trace) + data (for UI cards) +
   facts (for the verifier):
     get_financial_snapshot, project_goal, simulate_scenario, run_monte_carlo,
     analyze_portfolio, recommend_allocation, get_next_best_actions,
-    plan_debt_payoff, compare_scenarios, search_knowledge, update_plan,
-    list_scenario_presets
+    estimate_action_impact, optimise_goal_funding, plan_debt_payoff,
+    compare_scenarios, search_knowledge, update_plan, list_scenario_presets
 
   intent.ts       10 intents (overview, goal, whatif, portfolio, actions, debt,
                   probability, education, update, compare) via phrase/word scoring.
@@ -316,12 +319,17 @@ A6. DATA, PERSISTENCE AND RUN MODES
   * The client persists only the profile id in localStorage; the snapshot is
     computed locally from the profile by the shared engine, so every edit is
     instant and the server is authoritative for persistence, not for display
-  * Three run modes selected by environment, no code change:
+  * Four run modes selected by environment, no code change:
       deterministic - no credentials at all, full feature set, rule-based prose
-      anthropic     - ANTHROPIC_API_KEY set
+      anthropic     - ANTHROPIC_API_KEY set (wins if several are available)
+      groq          - GROQ_API_KEY set
       bedrock       - AWS region + Lambda execution role
   * Tunables: PORT, NODE_ENV, LOG_LEVEL, CLAUDE_MODEL, MAX_AGENT_STEPS (6),
-    SIMULATION_PATHS (2000), REQUEST_TIMEOUT_MS, CORS_ORIGINS, TABLE_NAME
+    SIMULATION_PATHS (2000), REQUEST_TIMEOUT_MS, CORS_ORIGINS, TABLE_NAME,
+    GROQ_MODEL, GROQ_MAX_TOKENS, GROQ_RETRY_BUDGET_MS, GROQ_BASE_URL
+  * npm run dev loads a .env at the repo root if one is present
+    (--env-file-if-exists); npm test deliberately does not, so the suite stays
+    on the credential-free path
 
 --------------------------------------------------------------------------------
 A7. UI KIT AND CHARTS
@@ -333,15 +341,15 @@ A7. UI KIT AND CHARTS
               ScenarioComparison, TableToggle (chart <-> table, for accessibility)
 
 --------------------------------------------------------------------------------
-A8. TESTS - 117, all green, no credentials needed
+A8. TESTS - 183, all green, no credentials needed
 --------------------------------------------------------------------------------
-  Engine (46)    solver round-trips (the required contribution fed back through the
+  Engine (79)    solver round-trips (the required contribution fed back through the
                  projection must land on the target), seeded reproducibility,
                  percentile band ordering, the variance-drag correction, and
                  invariants across all 3 personas: net worth reconciles, pillar
                  weights sum to 1, allocations sum to 1, actions arrive ranked and
                  every one carries assumptions
-  API+agent (42) real HTTP against a listening server: status codes, serialisation,
+  API+agent (75) real HTTP against a listening server: status codes, serialisation,
                  intent routing, natural-language lever extraction, BM25 accuracy,
                  every tool's output shape, the grounding verifier, SSE frame
                  validity, a full conversation round-trip, and an assertion that
@@ -376,6 +384,143 @@ A9. CI/CD, INFRASTRUCTURE AND DOCS
                         project references, npm scripts: dev, build, test,
                         typecheck, lint, format, verify, synth, deploy
 
+--------------------------------------------------------------------------------
+A10. ADDED SINCE THIS FILE WAS FIRST GENERATED
+--------------------------------------------------------------------------------
+  A1-A9 above have been corrected to match. This section covers only what is
+  new, and why it exists. Read from the source, same as the rest of the file.
+
+  A10.1  HEALTH COVER AS A FIRST-CLASS NEED
+    - healthCoverTarget() in assumptions.ts:
+        max(annual income x multiple, floor for age band) + per-dependent loading
+      The max is the model: income alone under-insures a young earner whose
+      first admission costs what anyone else's does, and a flat floor alone
+      under-insures a high earner whose household spends more when treatment
+      interrupts earnings.
+    - HEALTH_COVER_AGE_BANDS (40 / 55) step the floor rather than scaling it,
+      because treatment cost rises with age while insurability falls.
+    - close-health-cover-gap is rule 5 in the waterfall, between the two cover
+      rules. It states the shortfall and the target it was measured against.
+    - The wellness Protection pillar scores against that same target, so the
+      score and the action can no longer disagree.
+    - All five constants are editable in the Assumptions ledger.
+
+  A10.2  WHAT THE PLAN IS WORTH  (Dashboard hero)
+    - GET /api/plan/:id/impact returns before/after for the top N actions:
+      wellness score and grade, retirement funded %, goals on track, total
+      interest paid, months to debt-free, median corpus, emergency months and
+      monthly surplus, plus each action's marginal contribution.
+    - components/ImpactHero.tsx renders it at the top of the Dashboard.
+    - Computed server-side: three cumulative snapshots and three seeded
+      simulations are not work for the render thread. Refetched on save.
+    - Only applicable, affordable actions count, so the figure cannot promise a
+      contribution the household cannot fund.
+    - Negative marginals are shown, not hidden: raising equity can raise the
+      expected return and the variance drag together, lowering the median.
+
+  A10.3  GOAL-PRIORITY OPTIMISER  (Goals)
+    - shared/optimiser.ts: allocateSurplus() and optimiseGoalFunding() decide
+      which goals get the one surplus when they compete, scoring on priority
+      weight, funded ratio and time remaining.
+    - A goal inside nearTermGoalMonths of its date funds before longer-horizon
+      goals of equal priority: a near-term goal cannot be rescued later and has
+      no compounding left to make up the difference.
+    - components/SurplusSplit.tsx makes the cost as prominent as the
+      recommendation. Every starved goal states its delay in years, because
+      "your second home arrives four years later" is a sentence someone can
+      decide about and "short by 41 lakh" is not.
+    - POST /api/plan/:id/optimise-goals; optimise_goal_funding is an agent tool.
+    - Four new ledger tunables: goalWeightMustHave, goalWeightImportant,
+      goalWeightAspirational, nearTermGoalMonths.
+
+  A10.4  CONVERSATION HISTORY, SHARED BASELINE, RISK LADDER
+    - GET /api/agent/:id/sessions and GET /api/agent/sessions/:sessionId back a
+      conversation list in the Assistant, so a session survives a reload.
+    - components/RiskLadder.tsx appears on both Portfolio and Assumptions,
+      driven by useRiskLadder(profileId).
+    - Scenario comparison runs against a shared baseline rather than per-card
+      baselines, so two scenarios are read from the same starting point.
+
+  A10.5  GROQ AS A FOURTH REASONING PROVIDER
+    - agent/groq.ts is a pure translation layer between Anthropic message shapes
+      and Groq's OpenAI-compatible Chat Completions endpoint, in both
+      directions, handing back a real Anthropic.Message. The orchestrator is
+      untouched and still has no provider branching.
+    - No new dependency: Groq's wire format is JSON over fetch, so the Lambda
+      bundle is unchanged at 271 KB. Default model openai/gpt-oss-120b.
+    - reasoning_effort is sent by allowlist (gpt-oss, qwen3). groq/compound
+      rejects the parameter with a 400, so an unknown model loses effort control
+      rather than losing the whole request.
+    - gpt-oss streams its chain of thought in a `reasoning` field beside
+      `content`. Only `content` is forwarded, because whatever is forwarded is
+      streamed into the user's answer.
+    - GROQ_MAX_TOKENS (1500) clamps the orchestrator's 8000. Groq reserves the
+      whole of max_tokens against a per-minute allowance, so passing 8000
+      through spends a free account's entire minute on one call, and every
+      request 429s before the model sees it.
+    - Two retries, honouring the wait Groq states in the 429 body and the
+      retry-after header, bounded by GROQ_RETRY_BUDGET_MS (12s) across the whole
+      call. This matches the maxRetries: 2 the Anthropic SDK gives the other
+      paths; without it the Groq path was the least resilient of the four.
+    - activeModel() in config.ts: /api/health and /api/agent/capabilities report
+      the model actually answering. They returned the Claude id for any
+      non-deterministic provider, so Groq mode badged the UI claude-opus-5 while
+      gpt-oss did the writing.
+    - Quota behaviour, not a defect: an agent step costs ~3,000 tokens with all
+      14 tool schemas attached, against 8,000/minute on a free Groq account -
+      about two steps. Past that the run falls back to the deterministic engine
+      and the answer arrives with identical numbers, in plainer prose.
+
+  A10.6  SSE: A RECOVERABLE AGENT ERROR NO LONGER KILLS THE STREAM
+    - `error` is unusable as an SSE event name. EventSource dispatches a server
+      frame of that name as the same event a dropped connection fires, so the
+      browser client read a recoverable agent notice as a dead socket, closed
+      the stream, and discarded the `final` answer arriving milliseconds later.
+      The symptom was "The connection to the assistant was interrupted" on runs
+      the server had completed successfully.
+    - SseStream maps that one event to `agent_error` on the wire. The payload
+      still carries type: 'error', so AgentEvent in @wealth/shared and every
+      consumer switching on event.type are unchanged.
+    - Latent since the first agent build; only reachable once a provider began
+      failing mid-run.
+
+  A10.7  THE ENGINE IS CURRENCY-CORRECT, NOT JUST THE FORMATTER
+    - Four assumptions are amounts of rupees rather than rates: the three health
+      cover floors and the per-dependent loading. Nothing converted them, so a
+      USD profile was measured against unconverted rupee constants - a 5,00,000
+      rupee floor read as $500,000, and every user looked uninsured. Measured
+      before the fix: Protection 28->11 (aarav), 56->46 (meera), 75->60 (rohan),
+      with every other pillar unchanged.
+    - MONETARY_ASSUMPTION_KEYS names those four; ASSUMPTION_BASE_CURRENCY
+      records that the house view is stated in INR.
+    - resolveAssumptions() - the one chokepoint every consumer already goes
+      through - restates them in the profile's currency, which fixed the engine,
+      the optimiser, the agent tools and the server at once.
+    - Overrides are stored in the profile's currency and layered on after
+      conversion: the ledger edits in the displayed currency, so converting an
+      override again would divide the user's own number by the rate twice.
+      switchCurrency moves them along with every other amount.
+    - Ledger slider bounds are currency-aware. Written in rupees they are 83x
+      too coarse to express a converted value, so touching a slider in USD would
+      have snapped the assumption to something absurd - a display bug becoming a
+      data-loss bug.
+    - Residual: switchCurrency rounds to whole units, so one pillar of one
+      persona can read +/-1 between currencies. Re-measured with an unrounded
+      conversion it is identical, which is how we know it is rounding rather
+      than another stray constant.
+
+  A10.8  DEVELOPER-FACING
+    - npm run dev loads a repo-root .env via --env-file-if-exists. Nothing read
+      that file before, so .env.example was aspirational and a key set there did
+      nothing. npm test deliberately does not load it, so the suite stays on the
+      credential-free path.
+    - New test files: shared/test/currency.test.ts (currency invariance across
+      every persona), server/test/groq.test.ts (the wire mapping in both
+      directions, stream-chunk reassembly, the retry policy) and
+      server/test/sse.test.ts (the reserved event name never reaches the wire).
+    - docs/DEPLOYMENT.md and .env.example document every GROQ_* tunable and the
+      free-tier quota arithmetic.
+
 ================================================================================
 PART B - DELIBERATELY NOT MODELLED (and said so in-app)
 ================================================================================
@@ -403,23 +548,18 @@ C1. BLOCKERS FOR ANYTHING BEYOND A DEMO
     sessions accumulate forever.
 
 C2. BUILT ON THE SERVER, NOT SURFACED IN THE UI  (cheapest wins)
-  * Chat history. GET /api/agent/:id/sessions and /sessions/:sessionId exist, and
-    api.sessions()/api.session() exist in the web client - but the Assistant page
-    only tracks the live sessionId. There is no conversation list, no reload, no
-    "new chat". This is a UI-only task against endpoints that already work.
+  * [DONE - see A10.4] Chat history. The Assistant now lists conversations and
+    reloads them; the endpoints it was always able to call are now called.
   * POST /api/plan/:id/scenarios/compare runs up to 6 scenarios server-side; the
     Scenario Lab pins a maximum of 3 and compares them client-side only.
-  * GET /api/plan/:id/allocation (the 5-portfolio risk ladder with return and vol)
-    is rendered on Portfolio but not offered on Assumptions or Scenarios.
+  * [PARTLY DONE - see A10.4] The risk ladder (GET /api/plan/:id/allocation) is
+    now on Portfolio and Assumptions. Scenarios still does not offer it.
 
 C3. MISSING RULES AND MODEL FIDELITY
-  * healthInsuranceCover is collected in onboarding AND in the profile editor AND
-    typed on UserProfile - but no action rule ever reads it. Life cover has
-    close-life-cover-gap; health cover has nothing. The smallest high-value
-    addition in this whole list.
-  * No goal-priority optimiser. Goals compete for one surplus (the knowledge base
-    even has a document about it), but nothing allocates that surplus across goals
-    optimally - the user is told each gap separately.
+  * [DONE - see A10.1] healthInsuranceCover was collected everywhere and read
+    nowhere. It now drives close-health-cover-gap and the Protection pillar.
+  * [DONE - see A10.3] Goal-priority optimiser. shared/optimiser.ts allocates the
+    one surplus across competing goals and names what the starved ones cost.
   * Retirement drawdown uses a single de-risked deterministic return to find the
     depletion age; sequence-of-returns risk is only modelled in accumulation.
   * use-tax-deduction checks remaining deductible room rather than computing an
@@ -429,7 +569,10 @@ C3. MISSING RULES AND MODEL FIDELITY
 
 C4. PRODUCT SURFACE NOT YET BUILT
   * No export of any kind: no PDF plan, no CSV, no shareable scenario link.
-  * No multi-currency beyond a display toggle at a hardcoded 83 INR/USD rate.
+  * Still no real multi-currency: one display toggle at a hardcoded 83 INR/USD
+    rate, labelled illustrative in the UI. The engine is now currency-correct
+    either side of that toggle (A10.7), but the rate itself is not live, there
+    is no third currency, and no amount carries its own currency.
   * No account aggregation or market data - every price is user-entered.
   * No notifications, reminders, or progress-over-time tracking. The platform has
     no concept of history: no snapshots are stored over time, so "am I doing better
@@ -453,10 +596,8 @@ C6. HOUSEKEEPING
 --------------------------------------------------------------------------------
 A SUGGESTED ORDER, IF IT HELPS
   1. git init + push (nothing in C1-C5 is verifiable by CI until this exists)
-  2. Health-cover rule (C3) - hours of work, and it closes a visible
-     data-collection loop the user can already see in onboarding
-  3. Chat history UI (C2) - about a day, against endpoints and client methods
-     that already work
+  2. [DONE] Health-cover rule (C3) - see A10.1
+  3. [DONE] Chat history UI (C2) - see A10.4
   4. Auth + per-user scoping (C1) - the gate on everything public-facing
   5. Alarms + rate limiting (C1) - the gate on anything that costs money to run
   6. Tax model (C3 / PART B) - the largest fidelity jump, and the biggest task here

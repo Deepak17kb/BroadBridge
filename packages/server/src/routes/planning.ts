@@ -3,6 +3,7 @@ import { z } from 'zod';
 import {
   buildSnapshot,
   computeActionImpact,
+  optimiseGoalFunding,
   planDebtPayoff,
   planningHorizon,
   portfolioExpectedReturn,
@@ -277,5 +278,29 @@ router.get(
     const topN = Number.isFinite(requested) ? Math.min(Math.max(Math.trunc(requested), 1), 10) : 3;
 
     res.json(computeActionImpact({ profile, topN }));
+  }),
+);
+
+/**
+ * How the money available each month should be split across the goals.
+ *
+ * The pool is free surplus **plus what the goals already receive**, because the
+ * interesting question is rarely "where does the spare money go" - most plans
+ * have none - but "is the money already committed pointed at the right goals".
+ * `surplusOverride` answers the what-if without touching the stored plan.
+ */
+router.post(
+  '/:id/optimise-goals',
+  asyncHandler(async (req, res) => {
+    const store = await getStore();
+    const profile = await store.getProfile(req.params.id as string);
+    if (!profile) throw notFound('Profile');
+
+    const body = parseBody(
+      z.object({ surplusOverride: z.number().min(0).max(100_000_000).optional() }),
+      req.body ?? {},
+    );
+
+    res.json(optimiseGoalFunding({ profile, surplusOverride: body.surplusOverride }));
   }),
 );

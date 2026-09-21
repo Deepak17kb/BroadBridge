@@ -78,13 +78,13 @@ export interface PersonaSummary {
 export interface HealthInfo {
   status: string;
   version: string;
-  engine: 'bedrock' | 'anthropic' | 'deterministic';
+  engine: 'bedrock' | 'anthropic' | 'groq' | 'deterministic';
   model: string | null;
   time: string;
 }
 
 export interface AgentCapabilities {
-  engine: 'bedrock' | 'anthropic' | 'deterministic';
+  engine: 'bedrock' | 'anthropic' | 'groq' | 'deterministic';
   model: string | null;
   maxSteps: number;
   simulationPaths: number;
@@ -225,7 +225,10 @@ export function streamAgent(
     'token',
     'verification',
     'final',
-    'error',
+    // Not "error": EventSource cannot tell a server frame of that name from
+    // a dropped connection, so agent errors travel under this name instead.
+    // The payload still carries `type: 'error'`.
+    'agent_error',
   ] as const;
 
   for (const name of EVENTS) {

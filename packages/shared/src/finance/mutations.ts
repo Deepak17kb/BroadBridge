@@ -4,7 +4,7 @@ import type { AllocationWeights, NextBestAction, UserProfile } from '../types.js
 /**
  * The machine-applicable half of an action.
  *
- * Four of the fifteen rules carry a `apply` mutation - the rest recommend
+ * Four of the twelve rules carry a `apply` mutation - the rest recommend
  * something no software can do on the user's behalf (buy a policy, refinance a
  * loan, open an account). This module is what turns those four into an actual
  * edit, and it lives in the engine rather than in the React page because two
@@ -36,6 +36,17 @@ export function applyActionMutation(
     case 'increase_goal_contribution': {
       const goal = draft.goals.find((g) => g.id === mutation.goalId);
       if (goal) goal.monthlyContribution += mutation.amount;
+      break;
+    }
+
+    case 'set_goal_contributions': {
+      // A reallocation, not a top-up: goals absent from the list are left alone,
+      // and a goal the optimiser starved is set down to what it was given.
+      const byId = new Map(mutation.allocations.map((a) => [a.goalId, a.monthly] as const));
+      for (const goal of draft.goals) {
+        const next = byId.get(goal.id);
+        if (next !== undefined) goal.monthlyContribution = Math.max(0, next);
+      }
       break;
     }
 

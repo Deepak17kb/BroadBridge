@@ -37,7 +37,9 @@ export function Dashboard() {
   const { cashflow, netWorth, portfolio, retirement, wellness, risk, goalProjections } = snapshot;
 
   const onTrack = goalProjections.filter((g) => g.onTrack).length;
-  const topAction: NextBestAction | undefined = snapshot.actions[0];
+  // The dashboard is a summary surface: three is enough to act on, and the
+  // full ranked list lives one click away on /actions.
+  const topActions: NextBestAction[] = snapshot.actions.slice(0, 3);
   const firstName = profile.displayName.split(' ')[0] || 'there';
 
   /*
@@ -134,30 +136,35 @@ export function Dashboard() {
 
         <Card
           title="Do this next"
-          subtitle="Highest impact for the effort it takes"
+          subtitle="The three highest-impact moves for the effort they take"
           actions={
             <Link to="/actions" className="btn btn-sm">
-              All actions
+              See all {snapshot.actions.length} actions
             </Link>
           }
         >
-          {topAction ? (
+          {topActions.length > 0 ? (
             <div className="stack-sm">
-              <div className="strong">{topAction.title}</div>
-              <p className="text-sm text-muted">{topAction.why}</p>
-              <div className="row-between">
-                <Badge tone="accent">{topAction.category}</Badge>
-                <span className="text-sm">
-                  <span className="text-positive strong num">
-                    {topAction.impact.unit === 'currency'
-                      ? formatCompact(topAction.impact.value, currency)
-                      : topAction.impact.unit === 'percent'
-                        ? `${topAction.impact.value}%`
-                        : `${topAction.impact.value} ${topAction.impact.unit}`}
-                  </span>{' '}
-                  <span className="text-xs text-subtle">{topAction.impact.metric.toLowerCase()}</span>
-                </span>
-              </div>
+              {topActions.map((action, i) => (
+                <div key={action.id} className="stack-sm">
+                  {i > 0 && <div className="divider" />}
+                  <div className="strong">{action.title}</div>
+                  <p className="text-sm text-muted">{action.why}</p>
+                  <div className="row-between">
+                    <Badge tone={i === 0 ? 'accent' : 'info'}>{action.category}</Badge>
+                    <span className="text-sm">
+                      <span className="text-positive strong num">
+                        {action.impact.unit === 'currency'
+                          ? formatCompact(action.impact.value, currency)
+                          : action.impact.unit === 'percent'
+                            ? `${action.impact.value}%`
+                            : `${action.impact.value} ${action.impact.unit}`}
+                      </span>{' '}
+                      <span className="text-xs text-subtle">{action.impact.metric.toLowerCase()}</span>
+                    </span>
+                  </div>
+                </div>
+              ))}
               <div className="divider" />
               <div className="text-xs text-subtle">
                 {snapshot.actions.length} actions identified ·{' '}

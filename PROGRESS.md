@@ -455,3 +455,647 @@ by zero in the simulation.
   conservative one.
 - No UI test for the hero card — same SSR-only limitation as T3. The endpoint and
   the engine beneath it are covered.
+
+---
+
+## Groq — a third reasoning provider  [done]
+
+Out of queue: requested directly, not from `IMPLEMENTATION.md`. Slots beside
+`anthropic` and `bedrock`; the execution order is otherwise untouched and T5 is
+still the next task.
+
+**Files touched**
+- `packages/server/src/agent/groq.ts` *(new)* — the whole Anthropic↔OpenAI
+  translation layer, plus the SSE reader and the stream accumulator.
+- `packages/server/src/agent/llm.ts` — `GroqClient`, `GroqApiError`, error
+  narrowing by HTTP status, and the `getLlm()` branch.
+- `packages/server/src/config.ts` — `groq` provider, `groqModel`,
+  `groqBaseUrl`, `groqMaxTokens`, and `activeModel()`.
+- `packages/server/src/app.ts`, `routes/agent.ts`, `index.ts` — report the model
+  actually answering.
+- `packages/shared/src/types.ts`, `packages/web/src/lib/api.ts`,
+  `components/Shell.tsx`, `pages/Assistant.tsx` — `groq` in the engine union and
+  its badge.
+- `packages/server/test/groq.test.ts` *(new)*, `packages/server/package.json`,
+  `.env.example`, `docs/API.md`, `docs/DEPLOYMENT.md`.
+
+**Decisions I made without asking**
+- **No new dependency.** Groq's endpoint is OpenAI-compatible JSON, so it is
+  reached with `fetch`. `groq-sdk` would have shipped a package to the Lambda
+  bundle to do what 40 lines already do, and that needs asking. Bundle is
+  unchanged at 271 KB.
+- **The translation layer is its own module.** `llm.ts` keeps the clients;
+  `groq.ts` holds the mapping, because the mapping is the part that rots
+  silently and it is the part worth testing without a network.
+- **The orchestrator was not touched.** `GroqClient` returns a real
+  `Anthropic.Message`, so provider branching stays out of the agent loop.
+- **`activeModel()`.** `/api/health` and `/api/agent/capabilities` returned
+  `config.model` for any non-deterministic provider, so Groq mode would have
+  badged the UI `claude-opus-5` while gpt-oss did the writing. A badge naming
+  the wrong model is worse than no badge.
+- **Anthropic wins when both keys are set.** `GROQ_API_KEY` alone selects Groq;
+  `LLM_PROVIDER=groq` forces it either way.
+- **`reasoning_effort` is sent by allowlist, not denylist.** `groq/compound`
+  rejects it with a 400. An unknown model should lose effort control, not the
+  whole request.
+- **`GROQ_MAX_TOKENS` defaults to 1500, clamping the orchestrator's 8000.** Groq
+  reserves the whole of `max_tokens` against a per-minute allowance, so passing
+  8000 through spent a free account's entire minute on one call and every
+  request 429'd before the model saw it. Measured: the same call went from
+  ~11,000 tokens requested to 2,984.
+- **`npm run dev` now loads `.env`** via `--env-file-if-exists`. Nothing read
+  that file before, so `.env.example` was aspirational and a key set there did
+  nothing. Deliberately not added to `npm test`, which must stay credential-free.
+- **The chain of thought is dropped, not streamed.** gpt-oss streams `reasoning`
+  in a sibling field to `content`. Forwarding it would have printed the model's
+  private reasoning into the user's answer.
+
+**Tests added (17)** — real output:
+```
+ℹ tests 74   ℹ pass 74   ℹ fail 0      (shared)
+ℹ tests 65   ℹ pass 65   ℹ fail 0      (server — was 48)
+ℹ tests 29   ℹ pass 29   ℹ fail 0      (web)
+$ npm run lint       → exit 0, zero warnings
+$ npm run typecheck  → clean
+$ npm run build      → exit 0
+```
+Total **168**. They cover the two directions of the mapping, the tool-call id
+round trip, argument fragments split across stream chunks, SSE events split
+across network chunks, the reasoning field never reaching the caller, the
+`reasoning_effort` allowlist and the token clamp.
+
+Verified live against `api.groq.com`, not just in tests:
+```
+engine   : groq
+tools    : get_financial_snapshot, run_monte_carlo
+grounding: 4/4 claims grounded
+```
+
+**Anything I deliberately left out**
+- **Not committed.** The working tree already holds the unfinished T5 optimiser,
+  and `packages/shared/src/types.ts` is modified by both. Committing would have
+  mixed two tasks into one commit against the one-task-per-branch rule, so the
+  Groq work is staged in the tree for you to split as you prefer.
+- **A free Groq account cannot finish most multi-step runs.** Each step costs
+  ~3,000 tokens with all 14 tool schemas attached, against an 8,000/minute
+  allowance — about two steps. Beyond that the run falls back to the
+  deterministic engine and the answer still arrives with identical numbers.
+  Fixing it properly means either a paid tier or sending Groq a reduced tool
+  set, and trimming the agent's tools is a product decision, not a wiring one.
+- **`ENGINE_LABEL` in `Shell.tsx` and `ENGINE_TEXT` in `Assistant.tsx` are now
+  two lists of the same four engines.** The duplication predates this task; I
+  extended both rather than extracting a shared map, per the no-drive-by-refactor
+  rule. Worth collapsing when something else touches those files.
+- **No retry on a 429.** Groq returns a `retry-after` hint the client ignores,
+  falling back instead. A retry would be a latency decision affecting every
+  provider, which belongs with T10's rate limiting.
+- **`npm test` still inherits a real `GROQ_API_KEY`/`ANTHROPIC_API_KEY` from the
+  shell if one is exported**, which would flip the suite off the deterministic
+  path. Pre-existing, not introduced here.
+
+---
+
+## Fix — a recoverable agent error killed the SSE stream  [done]
+
+Found by using the Assistant in the browser: a question answered with
+"The connection to the assistant was interrupted." right after the
+"Rank the highest-impact actions" step, with no answer. The server log showed
+the opposite — `agent run complete ... intent: actions, ms: 3864`. The run
+succeeded; only the client gave up.
+
+**Cause.** `error` is not usable as an SSE event name. EventSource dispatches a
+server-sent frame named `error` as an `error` event *on the EventSource object*
+— the same event a dropped connection fires. `streamAgent`'s `onerror` cannot
+tell the two apart, so it treated a recoverable agent notice as a dead socket,
+closed the stream, and discarded the `final` answer arriving milliseconds later.
+
+Reproduced deterministically by pointing `GROQ_BASE_URL` at a dead port:
+```
+before: run_started plan error      plan tool_call ... verification final thought done
+after:  run_started plan agent_error plan tool_call ... verification final thought done
+```
+Both runs complete server-side; only the first one is thrown away by the browser.
+
+**Pre-existing, exposed by Groq.** The orchestrator has always emitted
+`type: 'error'` when the model path fails. It had never been reachable in
+practice: with no key the agent starts deterministic and never errors, and with
+a working key it does not fail mid-run. Groq's free tier 429s partway through a
+multi-step run, which is the first thing that routinely trips it.
+
+**Files touched**
+- `packages/server/src/lib/sse.ts` — `WIRE_NAMES` maps `error` to `agent_error`
+  on the wire only.
+- `packages/web/src/lib/api.ts` — listens for `agent_error`.
+- `packages/server/test/sse.test.ts` *(new)*, `packages/server/package.json`.
+
+**Decision I made without asking.** Only the *wire* name changes. The payload
+still carries `type: 'error'`, so `AgentEvent` in `@wealth/shared` is untouched
+and every consumer that switches on `event.type` — including
+`Assistant.tsx:237` — keeps working unchanged. Renaming the shared union member
+would have been a breaking change to the shared API for no benefit.
+
+**Tests added (2)** — real output:
+```
+ℹ tests 74   ℹ pass 74   ℹ fail 0      (shared)
+ℹ tests 67   ℹ pass 67   ℹ fail 0      (server — was 65)
+ℹ tests 29   ℹ pass 29   ℹ fail 0      (web)
+$ npm run lint  → exit 0    $ npm run build → exit 0
+```
+Total **170**. The guard asserts the reserved name never reaches the wire, that
+the agent error still arrives, and that the payload keeps its own discriminant.
+
+**Anything I deliberately left out**
+- **No retry on the underlying 429.** The stream now survives it and the answer
+  still arrives from the deterministic engine, but on a free Groq account a
+  multi-step run will still often be narrated by the fallback rather than the
+  model. That is the quota, not the framing.
+- **`npm run dev` had a second bug I introduced and fixed here:** the script was
+  `tsx --env-file-if-exists=... watch src/index.ts`, and tsx reads the first
+  non-flag argument as the entry file, so it tried to run a file named `watch`
+  and the API never started. The subcommand must come first.
+
+---
+
+## Fix — "rate limited, retrying shortly" was a lie, and nothing retried  [done]
+
+Reported from the browser: two questions answer fine, then a third ends with
+"The reasoning service is rate limited. Retrying shortly." Two separate faults
+behind one message.
+
+**Fault 1 — the copy promised something that never happened.** Nothing retried.
+`describeLlmError` is only reached after the orchestrator has given up, on its
+way into the deterministic fallback. The message is now what actually occurs:
+"…Answering with the deterministic engine instead." Fixed in both places it
+appears, so the Anthropic path stops making the same false promise.
+
+**Fault 2 — the Groq client had no retry at all.** `new Anthropic({ maxRetries: 2 })`
+gives the other two providers two automatic retries from the SDK; the
+fetch-based Groq path I added had none, making it the least resilient of the
+three. It now retries twice, honouring the wait Groq states in the 429 body
+("Please try again in 1.38s") and the `retry-after` header, preferring the hint
+over backoff because the allowance refills continuously rather than on a fixed
+boundary.
+
+Retrying inside `post()` is deliberate: it runs before the response body is
+touched, so no tokens have streamed and a retry cannot duplicate text.
+
+**The ceiling was wrong on the first attempt.** I capped a single wait at 8s.
+Measured against the real account, a mid-run step is told to wait 9-10s, so the
+cap rejected exactly the retries worth taking - two of three questions still
+fell back. Replaced with a cumulative budget across the call
+(`GROQ_RETRY_BUDGET_MS`, default 12s): what matters to someone watching a
+spinner is total delay, and a per-attempt cap bounds the wrong thing.
+
+Three consecutive questions, before and after:
+```
+before:  groq (8s) | deterministic | deterministic     retryInMs: null, null
+after:   groq (8s) | groq (24s)    | deterministic (1s)  retryInMs: 10000, 8000
+```
+
+**Files touched**
+- `packages/server/src/agent/groq.ts` — `retryDelayMs`, `hintedDelayMs`, `sleep`.
+- `packages/server/src/agent/llm.ts` — retry loop in `GroqClient.post()`,
+  honest copy, `GROQ_MAX_RETRIES`.
+- `packages/server/src/config.ts` — `groqRetryBudgetMs`.
+- `packages/server/test/groq.test.ts`, `.env.example`, `docs/DEPLOYMENT.md`.
+
+**Tests added (8)** — real output:
+```
+ℹ tests 74   ℹ pass 74   ℹ fail 0      (shared)
+ℹ tests 75   ℹ pass 75   ℹ fail 0      (server — was 67)
+ℹ tests 29   ℹ pass 29   ℹ fail 0      (web)
+$ npm run lint → exit 0   $ npm run typecheck → clean   $ npm run build → exit 0
+```
+Total **178**. They pin the hint parser against a verbatim Groq 429 body, the
+header winning over the message, the cumulative budget, the bound on attempts,
+and which statuses are worth retrying at all.
+
+**Anything I deliberately left out**
+- **The budget bounds one call, not one run.** The agent makes a request per
+  step, so each gets its own budget — which is why the rescued question took
+  24s across two waits. Making it per-run means threading state through the
+  orchestrator, which this task did not ask for.
+- **The third question still falls back, and always will.** Three questions in
+  40s is ~10,000 tokens against an 8,000/minute allowance. Retrying cannot
+  manufacture quota; it only stops the platform giving up on waits it could
+  afford. The structural fixes remain a paid tier or fewer tool schemas per
+  step, and the latter is a product decision.
+- **No jitter on the backoff.** One client, no thundering herd to avoid.
+
+---
+
+## Fix — the engine read rupee constants against a dollar profile  [done]
+
+Reported as "the conversion rate is not correct" after switching INR to USD.
+The rate and `convertCurrency` were both fine. What was wrong was that four
+assumptions are *amounts of rupees*, and nothing converted them, so a converted
+profile was compared against unconverted constants.
+
+**Measured, all three personas, before:**
+```
+aarav   wellness INR=43 USD=39    Protection INR=28 USD=11
+meera   wellness INR=60 USD=57    Protection INR=56 USD=46
+rohan   wellness INR=72 USD=68    Protection INR=75 USD=60
+```
+Only Protection moved, in every persona. `healthCoverTarget` is
+`max(income x multiple, floorForAge) + dependents x perDependent`. The income
+term scales with the profile's currency; the floor and the per-dependent
+loading are fixed rupee amounts. In USD the income term collapses by 83x, the
+rupee floor then dominates as though it were dollars, and the target becomes
+83x too large - aarav's ₹5,00,000 cover, correctly converted to $6,024, was
+measured against a floor of "$500,000".
+
+**After:**
+```
+aarav   wellness 43 = 43    meera 60 = 60    rohan 72 = 72    Protection identical
+```
+
+**Fix.** `MONETARY_ASSUMPTION_KEYS` names the four assumptions that are money
+rather than rates, and `ASSUMPTION_BASE_CURRENCY` records that the house view
+states them in INR. `resolveAssumptions` - the single chokepoint every consumer
+already goes through - converts the defaults into the profile's currency, which
+fixed the engine, the optimiser, the agent tools and the server at once.
+
+**Decisions I made without asking**
+- **Overrides are stored in the profile's currency, defaults in INR.** The
+  ledger already edits these in the displayed currency, so an override is
+  layered on *after* conversion and left alone; converting it again would
+  divide the user's own number by 83. `switchCurrency` now moves the monetary
+  overrides with every other amount, which keeps the two consistent.
+- **The conversion lives in `engine.ts`, not `assumptions.ts`.** `format.ts`
+  already imports `assumptions.ts`, so putting it there would have made a cycle
+  or forced a second copy of the conversion - the one thing this repo is most
+  careful not to have.
+- **The ledger's slider bounds are now currency-aware.** They were written in
+  rupees (`max 1_000_000`, `step 50_000`). Against a correctly-converted $3,614
+  per-dependent loading those are 83x too coarse to express the value, so
+  touching the slider would have snapped the assumption to something absurd -
+  turning a display bug into a data-loss bug. Bounds convert and round to one
+  significant figure, which is the identity in INR.
+
+**Files touched**
+- `packages/shared/src/assumptions.ts` — `MONETARY_ASSUMPTION_KEYS`,
+  `ASSUMPTION_BASE_CURRENCY`.
+- `packages/shared/src/finance/engine.ts` — `assumptionsInCurrency`, and
+  `resolveAssumptions` converts the house view.
+- `packages/web/src/state/ProfileContext.tsx` — `switchCurrency` moves monetary
+  overrides.
+- `packages/web/src/pages/Assumptions.tsx` — currency-aware slider bounds.
+- `packages/shared/test/currency.test.ts` *(new)*, `packages/shared/package.json`.
+
+**Tests added (5)** — real output:
+```
+ℹ tests 79   ℹ pass 79   ℹ fail 0      (shared — was 74)
+ℹ tests 75   ℹ pass 75   ℹ fail 0      (server)
+ℹ tests 29   ℹ pass 29   ℹ fail 0      (web)
+$ npm run lint → exit 0   $ npm run typecheck → clean   $ npm run build → exit 0
+```
+Total **183**. The load-bearing one asserts every persona scores identically in
+both currencies, which is what actually failed. One asserts net worth still
+differs by the rate, so invariance cannot be faked by ignoring currency; one
+pins that rates and multiples are *not* converted, which would be the opposite
+mistake; one pins that an override is read in the currency it was typed in.
+
+Verified against the running app, not only in tests:
+```
+INR  wellness 60 | protection 56 | net worth 4447500
+USD  wellness 60 | protection 56 | net worth 53585     (4447500 / 83 = 53584)
+```
+
+**Anything I deliberately left out**
+- **±1 point of rounding drift survives, in one pillar of one persona.**
+  `switchCurrency` rounds every amount to whole units, so aarav's Cashflow
+  pillar reads 67 in INR and 68 in USD. Re-measured with an unrounded
+  conversion it is 67 in both, which is how I know it is rounding and not
+  another stray constant. Removing it means storing fractional currency, which
+  is worse to read and to edit.
+- **`USD_INR_RATE = 83` is still a fixed illustrative rate**, and is labelled as
+  one in the UI and in `assumptions.ts`. Nothing here makes it a live rate, and
+  if the complaint was about the *rate* rather than the arithmetic, that is a
+  live FX feed and a different task.
+- **`engine.ts:462`'s `levers: { lumpSum: 300000 }` preset is still rupees.**
+  It is a demo scenario input rather than an engine constant, so it does not
+  corrupt a score, but a USD user running that preset gets a $300,000 lump sum.
+  Noted rather than fixed, per the no-drive-by rule.
+
+---
+
+## Simplification brief — Phase 1, tasks 1-2  [done]
+
+### Task 1 — INR only
+Removed the second display currency rather than keeping it correct. Files:
+`shared/{types,assumptions,format}.ts`, `shared/finance/engine.ts`,
+`web/{state/ProfileContext,components/Shell,pages/Onboarding,pages/Assumptions}.tsx`,
+`server/routes/profiles.ts`.
+
+**Decision I made without asking.** `Currency` is narrowed to the single member
+`'INR'` rather than deleted. Deleting it meant a mechanical edit across 30 files
+that all pass `profile.currency` to a formatter; narrowing it instead makes the
+*compiler* prove no second currency can reach any of them, which a deleted
+parameter would not. `profile.currency` and the formatter parameter survive as
+provably-constant, and the Zod schema is now `z.literal('INR')` so a stray USD
+payload is a 400 rather than a silent accept.
+
+Gone: `USD_INR_RATE`, `CURRENCY_META`, `convertCurrency`, `switchCurrency`,
+`MONETARY_ASSUMPTION_KEYS`, `ASSUMPTION_BASE_CURRENCY`, `assumptionsInCurrency`,
+the K/M/B formatter, the shell and onboarding toggles, and the currency-scaled
+ledger slider bounds. `resolveAssumptions` is back to a plain override merge.
+
+This supersedes A10.7 — that work made the engine correct across two currencies;
+with one currency it was dead weight, which is what the brief says.
+
+`shared/test/currency.test.ts` deleted, replaced by `shared/test/inr.test.ts`
+(4 tests): lakh/crore formatting with an explicit assertion that no K/M/B scale
+survives, assumptions returned unrestated, a ledger override round-tripping
+byte-for-byte, and every persona being INR.
+
+### Task 2 — merged rules, 15 -> 12
+- `align-allocation` + `reduce-concentration` + `rebalance-portfolio` ->
+  **`rebalance-portfolio`**. All three said "your portfolio is not the shape you
+  agreed to", which is one decision and one trip to the broker.
+- `deploy-idle-cash` + `automate-surplus` -> **`deploy-surplus`**.
+
+12, not the ~10-11 the brief estimated: the remaining ten do not overlap without
+losing a distinct decision, and I would rather report the real number.
+
+**Decisions I made without asking**
+- **A merged rule scores `Math.max` of its parts, never an average**, so
+  consolidating can never bury a signal that used to surface on its own. There
+  is a test for exactly this.
+- **Every signal still reports its own reason, steps, assumptions and
+  evidence** - the merge removes duplicate *actions*, not information.
+- **`deploy-surplus` projects both halves over one horizon.** They were
+  separately projected over 10 years and time-to-retirement; adding those two
+  figures into one headline would have been meaningless.
+- **`apply` is conditional on the merged rebalance rule**: drift has an exact
+  set of trades (`rebalance_to_target`), the other two signals are a change of
+  target (`set_allocation`).
+- Dashboard "Do this next" now shows the top 3 with a "See all N actions" link;
+  /actions still lists everything.
+
+**Tests** — real output:
+```
+ℹ tests 83   ℹ pass 83   ℹ fail 0      (shared — was 79)
+ℹ tests 75   ℹ pass 75   ℹ fail 0      (server)
+ℹ tests 29   ℹ pass 29   ℹ fail 0      (web)
+$ npm run lint → exit 0   $ npm run typecheck → clean   $ npm run build → exit 0
+```
+187 total. New `shared/test/actions-merged.test.ts` (5 tests) asserts the retired
+ids are gone from every persona, that concentration still reaches the user
+through the merged rule, that the merged score never drops below its most urgent
+part, and that both halves of `deploy-surplus` share one horizon.
+
+One existing assertion changed: `api.test.ts` looked for `deploy-idle-cash`,
+which is now `deploy-surplus`. That is the rename, not a weakened expectation.
+
+Copy reconciled in README, `docs/API.md`, `docs/DEMO_SCRIPT.md`, `Actions.tsx`,
+`mutations.ts`, `impact.ts` and `FEATURES.txt` (count and waterfall list).
+Four of twelve rules still carry a machine-applicable mutation.
+
+### Not started
+Tasks 3-15 of that brief.
+
+---
+
+## Groq rate limiting — a single question no longer exhausts a free minute  [done]
+
+**The report:** every question answered, but with "The reasoning service is rate
+limited. Answering with the deterministic engine instead." above the answer.
+
+**What was actually happening.** Groq returned 429 part-way through every run:
+
+```
+Rate limit reached for model `openai/gpt-oss-120b` ... service tier `on_demand`
+on tokens per minute (TPM): Limit 8000, Used 7963, Requested 3043.
+Please try again in 22.545s
+```
+
+One question cost roughly 10,300 tokens against an 8,000-token minute, so it ran
+its own allowance out around the third call and fell back mid-run. Measured
+against Groq's tokeniser, the fourteen tool schemas are 1,641 prompt tokens and
+were re-sent on every step — about 4,900 of the minute spent restating tools the
+plan was never going to use. The rest went on chain of thought, billed as
+completion, at `reasoning_effort: 'high'` on every turn including the opening
+one, whose only decision the system prompt had already made.
+
+**The `max_tokens` theory in the old comments was wrong.** `config.ts` and
+`.env.example` both said Groq reserves `max_tokens` against the allowance, and
+`GROQ_MAX_TOKENS=1500` existed to stop that. It does not: a request carrying
+`max_tokens: 4000` was admitted against this account with 927 tokens left in the
+minute, and cost 151. Metering is prompt plus completion actually written. The
+clamp is still worth keeping — it bounds a runaway chain of thought — but it
+buys no headroom, so both comments now say what is true.
+
+Files touched:
+- `packages/server/src/agent/tools.ts` — `toolSchemas(only?)` narrows to named
+  tools; unknown names ignored, so a plan containing `synthesize` can be passed
+  straight in.
+- `packages/server/src/agent/orchestrator.ts` — `offeredTools(plan, scope)`;
+  opening turn drops to `effort: 'low'`, every later turn keeps `'high'`.
+- `packages/server/src/config.ts` — `agentToolScope: 'plan' | 'all'`
+  (`AGENT_TOOL_SCOPE`), defaulting to `plan` on Groq and `all` elsewhere.
+- `packages/server/src/agent/llm.ts` — debug-level per-call token metering.
+- `packages/server/test/agent.test.ts`, `.env.example`.
+
+Decisions I made without asking:
+- **Narrowing is config, not a provider check in the orchestrator.** Only Groq
+  is metered tightly enough for the schemas to be what runs it out. Putting the
+  provider default in `config.ts` keeps the orchestrator free of provider
+  branching, which is the property the module comment claims.
+- **`get_financial_snapshot` and `search_knowledge` are offered whatever the
+  plan says.** Rule 2 of the system prompt obliges a position read, and
+  grounding an explanation is always in bounds; neither may depend on the
+  router's guess.
+- **Low effort on the opening turn only.** A first attempt keyed on the planned
+  tool count also caught the answering turn — the model finishes before the plan
+  does, so it narrated at low effort and skipped the Monte Carlo step. Run cost
+  4,638 but the answer was visibly thinner. Step 1 is the rule that pays without
+  costing anything: 29 completion tokens there versus 548.
+- **`offeredTools` takes the scope as a parameter.** Tests run in deterministic
+  mode, where the default is `all`; without the parameter the narrowing path is
+  untestable.
+
+Measured, one question end to end (`groq call metered`, debug):
+
+```
+before:  4 calls   prompt 5628   completion 2673   TOTAL 8301  (429, fell back)
+after:   3 calls   prompt 4089   completion 1474   TOTAL 5563  (no fallback)
+```
+
+Tests added (3) — real output:
+```
+ℹ tests 83   ℹ pass 83   ℹ fail 0      (shared)
+ℹ tests 78   ℹ pass 78   ℹ fail 0      (server — was 75)
+ℹ tests 29   ℹ pass 29   ℹ fail 0      (web)
+$ npm run lint → exit 0    $ npm run typecheck → clean
+```
+190 total. `toolSchemas` narrowing and unknown-name handling; every tool a plan
+names exists; for all ten intents the offered set covers the plan, keeps both
+escape hatches, stays at most half the catalogue, and still returns everything
+under `'all'`. The intent list is a `Record<Intent, true>`, so adding an intent
+fails the compile until its plan has been checked.
+
+Anything I deliberately left out:
+- **Two questions inside the same minute still fall back**, and no code change
+  fixes it: a grounded run costs 5,500-7,000 tokens and the allowance is 8,000.
+  Every tool-capable model on this account is capped at 8,000 TPM — checked via
+  `x-ratelimit-limit-tokens` on `gpt-oss-120b`, `gpt-oss-20b` and `qwen3.8-27b`.
+  `groq/compound-mini` reports 70,000 TPM but answers custom tools with
+  `400 "tool calling is not supported with this model"`. The remedies are the
+  Dev tier, or `GROQ_RETRY_BUDGET_MS=30000` to wait the ~23s out instead of
+  falling back.
+- The SSE stream emits one event with no `type` (it shows up as `undefined` when
+  counting event types). Predates this change; not investigated.
+- `GROQ_MAX_TOKENS` left at 1500. Only its rationale was wrong, not its value.
+
+---
+
+## Onboarding number fields keep a leading 0 — and the interest rate cannot take a decimal  [done]
+
+**The report:** in "Enter my own numbers" every field starts at 0, and typing into
+it leaves the 0 in place.
+
+**Reproduced in the running app before touching anything** (Chrome, typing as a
+user does, then reading the input's DOM value):
+
+```
+dependents     typed "2"      -> "02"
+take-home pay  typed "85000"  -> "085000"   (the preview still said ₹85.0k)
+interest rate  typed "8.5"    -> "8.1"      (stored 8.1%, not 8.5%)
+```
+
+**Why.** A controlled `<input type="number">` re-derives its text from the
+stored number. React deliberately leaves the DOM alone when the text already
+parses to the controlled value, so "085000" stays on screen because it *is*
+85000 - the stored number was right, only the display kept the zero. The
+interest rate is the same mechanism made worse by `toFixed(1)`: the text is
+rewritten after every keystroke, so "8" became "8.0", the "5" landed after that
+zero, and 8.05 rounded to 8.1. The user could not enter 8.5% at all.
+
+Files touched:
+- `packages/web/src/components/ui.tsx` — `NumberInput`: zero renders as an
+  empty field with a "0" placeholder; the field keeps its own copy of the typed
+  text and only the parsed number leaves it; leading zeros dropped as typed
+  (`withoutLeadingZeros`). `MoneyInput` now renders through it.
+- `packages/web/src/pages/Onboarding.tsx` — dependents, pay rise, interest
+  rate and goal step-up moved to `NumberInput`; `asPercent` for the three
+  percentage fields.
+- `packages/web/test/render.test.tsx`.
+
+Decisions I made without asking:
+- **Fixed `MoneyInput` itself**, so the 26 money fields on Goals, Portfolio and
+  Profile get the fix too - it is the same component with the same bug, and
+  leaving it half-fixed would have meant two behaviours for one control.
+- **Values from outside resync during render, not in an effect** - React's
+  documented pattern for adjusting state when a prop changes, and it never
+  paints stale text. Verified in the browser: switching goals on the Goals page
+  refreshes the same mounted inputs (and back again), and "Apply this
+  allocation" updates the open goal's contribution from 12000 to 31000.
+- **Percentages show two decimals (`asPercent`) rather than `Math.round`.**
+  Once a decimal can actually be typed, rounding the display to whole numbers
+  would show 9 while the plan uses 8.5. The interest rate now shows `10`
+  rather than `10.0` for a round number.
+- **Kept `type="number"`**, so the spinner, arrow-key stepping and numeric
+  keyboard on mobile are unchanged.
+
+After the fix, same steps in the same browser:
+
+```
+dependents     typed "2"      -> "2"
+take-home pay  typed "85000"  -> "85000"
+interest rate  typed "8.5"    -> "8.5"
+```
+
+Tests added (3) — real output:
+```
+ℹ tests 83   ℹ pass 83   ℹ fail 0      (shared)
+ℹ tests 78   ℹ pass 78   ℹ fail 0      (server)
+ℹ tests 32   ℹ pass 32   ℹ fail 0      (web — was 29)
+$ npm run lint → exit 0    $ npm run typecheck → clean    $ npm run build → built
+```
+193 total. A zero `NumberInput` and a zero `MoneyInput` render `value=""` with
+`placeholder="0"` (both fail on the old code, which rendered `value="0"`);
+`withoutLeadingZeros` turns "085000" into "85000" and "-05" into "-5" but
+leaves "0", "0.5" and "8.05" alone. Typing itself needs a DOM, which this suite
+does not have - that part was verified in Chrome, above.
+
+Anything I deliberately left out:
+- **Age, retirement age and goal target year** have a different bug in the same
+  form: they fall back to a default when emptied (`|| 30`, `|| 60`, `|| 2040`),
+  so backspacing out the age refills "30" and the next keystroke appends
+  ("304"). Not a zero-placeholder problem, and fixing it means deciding when an
+  empty required field gets validated - untouched.
+- **Raw number inputs outside onboarding still use the old pattern:**
+  Goals — target year, step-up (`Math.round`), inflation override
+  (`toFixed(1)`, so the same can't-type-a-decimal bug as the interest rate);
+  Portfolio — expense ratio and interest rate (`toFixed(2)`); Profile — age,
+  retirement age, dependents (the same "02" bug) and pay rise. Each is a
+  one-line move to `NumberInput`.
+
+---
+
+## Onboarding pre-filled age 30 and retirement age 60  [done]
+
+**The report:** in "Enter my own numbers", age and target retirement age were
+already filled in.
+
+They came from `emptyProfile` (30 / 60), which the wizard used as its starting
+draft. That put two numbers into the plan the user never chose - retirement age
+drives the horizon, the risk capacity score and every retirement projection.
+
+Files touched:
+- `packages/web/src/pages/Onboarding.tsx` — the draft starts both ages at 0
+  ("not entered yet"), both fields use `NumberInput` with no placeholder, and
+  `checkAges` decides Continue and the warnings.
+- `packages/web/test/render.test.tsx`.
+
+Decisions I made without asking:
+- **Changed the wizard's draft, not `emptyProfile`.** The server's
+  `POST /profiles` without a persona builds from `emptyProfile`, and that
+  profile has to project; changing a shared export's defaults would also have
+  been a behaviour change to the `@wealth/shared` API.
+- **Blank is unfinished, not wrong.** An empty age holds Continue back with no
+  warning, so a fresh form never opens in red. Warnings appear only for values
+  actually entered: age outside 16-100 (the bounds the input already declared)
+  and retirement at or before the current age (existing copy), or past 100.
+  The old "retirement must be higher" callout compared 0 with 0 and would have
+  fired on a blank form.
+- **No "30" / "60" placeholder.** A grey 30 in the box would read as the same
+  pre-fill the report was about.
+- **The footer's wellness preview waits for real ages**, as it already waited
+  for income - going back and clearing the age otherwise showed a score
+  worked out for a 0-year-old.
+- **The `|| 30` / `|| 60` fallbacks are gone**, which also fixes the snap-back
+  noted in the previous entry: clearing the age used to refill "30", and the
+  next keystroke appended to it ("304").
+
+Verified in Chrome (Browser 2), reading the DOM after each step:
+
+```
+fresh form            age ""   retire ""   Continue disabled   no warnings
+28 / 60               hint "32 years of earning left to plan with"   Continue enabled
+retire 25, age 28     "Retirement age needs to be higher than your current age."   disabled
+age cleared           age ""   (stays empty - no snap back to 30)
+age 12                "Enter an age between 16 and 100."
+45 / 60 -> step 2     income 85000 -> "Wellness preview: 40/100"
+back, clear age       preview hidden, Continue disabled
+re-enter 45           preview back, Continue enabled
+```
+
+Tests added (2) — real output:
+```
+ℹ tests 83   ℹ pass 83   ℹ fail 0      (shared)
+ℹ tests 78   ℹ pass 78   ℹ fail 0      (server)
+ℹ tests 34   ℹ pass 34   ℹ fail 0      (web — was 32)
+$ npm run lint → exit 0    $ npm run typecheck → clean    $ npm run build → built
+```
+195 total. Blank ages are not ready and carry no warning, either alone or
+together; 32/60 is ready; retiring earlier than or at the current age, an age of
+12 and a retirement age of 120 each give their message.
+
+Anything I deliberately left out:
+- **Goal target year** still falls back to 2040 when emptied (`|| 2040`), so it
+  has the same snap-back. A goal needs *some* year to project, so a blank one
+  wants a decision about what the card shows meanwhile - not in this report.
+- **Profile page ages** stay pre-filled, correctly: that page edits values the
+  user has already given.

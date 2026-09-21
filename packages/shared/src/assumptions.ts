@@ -1,4 +1,10 @@
-import type { AllocationWeights, AssetClass, MarketAssumptions, RiskBucket } from './types.js';
+import type {
+  AllocationWeights,
+  AssetClass,
+  GoalPriority,
+  MarketAssumptions,
+  RiskBucket,
+} from './types.js';
 
 export const ASSET_CLASSES: AssetClass[] = [
   'equity_domestic',
@@ -66,7 +72,21 @@ export const DEFAULT_ASSUMPTIONS: MarketAssumptions = {
   healthCoverFloor40To55: 1_000_000,
   healthCoverFloorOver55: 1_500_000,
   healthCoverPerDependent: 300_000,
+  goalWeightMustHave: 1,
+  goalWeightImportant: 0.6,
+  goalWeightAspirational: 0.3,
+  nearTermGoalMonths: 24,
 };
+
+/** The funding weight for a goal's priority, as set in the Assumptions ledger. */
+export function goalPriorityWeight(
+  priority: GoalPriority,
+  assumptions: MarketAssumptions,
+): number {
+  if (priority === 'must_have') return assumptions.goalWeightMustHave;
+  if (priority === 'important') return assumptions.goalWeightImportant;
+  return assumptions.goalWeightAspirational;
+}
 
 /**
  * Age boundaries for the health-cover floor.
@@ -241,10 +261,4 @@ export const RISK_QUESTIONS: RiskQuestion[] = [
   },
 ];
 
-/** Illustrative FX used only when the user switches display currency. */
-export const USD_INR_RATE = 83;
 
-export const CURRENCY_META = {
-  INR: { symbol: '₹', locale: 'en-IN', code: 'INR' },
-  USD: { symbol: '$', locale: 'en-US', code: 'USD' },
-} as const;

@@ -10,7 +10,7 @@ import {
   type Citation,
   type UserProfile,
 } from '@wealth/shared';
-import { config } from '../config.js';
+import { type AppConfig, config } from '../config.js';
 import { logger } from '../lib/logger.js';
 import { classifyIntent, heuristicPlan, heuristicToolInput, type Intent } from './intent.js';
 import { retrieve } from './knowledge/retriever.js';
@@ -335,11 +335,38 @@ function buildMessage(args: {
 /* LLM path                                                                    */
 /* -------------------------------------------------------------------------- */
 
+/**
+ * Tools every answer may need whatever the plan says: rule 2 of the system
+ * prompt obliges the model to read the position before answering, and grounding
+ * an explanation in a principle is always in bounds.
+ */
+const ALWAYS_OFFERED = ['get_financial_snapshot', 'search_knowledge'] as const;
+
+/**
+ * The tools to put in front of the model this run.
+ *
+ * Under `agentToolScope: 'plan'` that is the router's chosen toolchain plus
+ * ALWAYS_OFFERED - typically four schemas rather than fourteen, which is the
+ * difference between a question fitting inside a free Groq account's per-minute
+ * allowance and running out of it mid-run. The plan's `synthesize` step names
+ * no tool and is dropped by `toolSchemas`, which ignores unknown names.
+ *
+ * The model can still decline the plan; it simply chooses from a shortlist the
+ * router picked for this intent rather than from everything the platform owns.
+ */
+export function offeredTools(
+  plan: AgentPlanStep[],
+  scope: AppConfig['agentToolScope'] = config.agentToolScope,
+): Anthropic.Tool[] {
+  if (scope === 'all') return toolSchemas();
+  return toolSchemas([...new Set([...ALWAYS_OFFERED, ...plan.map((step) => step.tool)])]);
+}
+
 async function runWithModel(
   args: PhaseArgs & { llm: NonNullable<Awaited<ReturnType<typeof getLlm>>> },
 ): Promise<AgentMessage> {
   const { llm } = args;
-  const tools = toolSchemas();
+  const tools = offeredTools(args.plan);
 
   // The user's position is injected up front. It costs a few hundred tokens and
   // removes an entire round-trip for the common case where the model would
@@ -372,7 +399,13 @@ async function runWithModel(
         messages,
         tools,
         maxTokens: 8000,
-        effort: 'high',
+        // The opening turn has one decision in it - which tool to read the
+        // position with - and the system prompt has already made it. On a
+        // reasoning model the chain of thought is billed as completion, so
+        // thinking hard here is paid for out of the same per-minute allowance
+        // the answer needs. Every later turn, tool-picking and narration
+        // alike, gets the full setting.
+        effort: step === 1 ? 'low' : 'high',
       },
       (delta) => {
         streamed += delta;
