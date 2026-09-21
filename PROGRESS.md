@@ -1413,3 +1413,243 @@ Tests added (1) - real output:
 ℹ tests 39    ℹ pass 39    ℹ fail 0      (web - was 38)
 $ npm run typecheck -> exit 0    $ npm run lint -> exit 0
 ```
+
+## UI redesign and polish  [done]
+
+Brief: a visual, structural and code-quality pass over the whole web app - no
+change to business logic, calculations, data flow or behaviour, and every number
+identical. Worked in the brief's phase order; this entry is the audit and the
+changelog.
+
+### Phase 1 - audit (before any edit)
+
+Measured with a headless-Chrome harness over every page at 360, 390, 768, 1024,
+1280, 1440 and 1920px, in seven profile states (Aarav, Rohan, a blank profile,
+one goal, ten goals, very large values, very small values), plus a read of every
+component and the stylesheet.
+
+Layout
+1. **Stretched cards** (grid `align-items: stretch`): Dashboard "Financial
+   wellness" +290-423px of empty card, "Where your money goes" +80-274px,
+   "Retirement outlook" +128-228px; Scenario Lab "Levers" +234-740px, "Where the
+   simulations landed" +113-165px; Assumptions "Expected returns" +27-101px.
+2. **Horizontal scroll** on Assumptions at 360px (+47px) and 390px (+17px): the
+   knowledge-base titles are `white-space: nowrap` badges.
+3. Content is left-aligned with a 1360px cap, leaving a dead band on the right at 1920px.
+4. Page and card headers keep the title and its button side by side on phones,
+   squeezing titles into three-line wraps.
+5. Dashboard wellness card: ring and pillars in a non-wrapping row - the pillars
+   get ~165px at 390px.
+6. Charts: currency y-axis labels wrap ("₹1.40" / "Cr") at the fixed 58px axis;
+   the goal range chart clips its last x tick; "Option comparison" keeps a fixed
+   height with one row, mostly empty.
+7. No vertical rhythm inside some cards - the surplus-split callout sits flush on its table.
+8. Mobile menu button shown by an injected `<style>` with `!important`; the
+   closed drawer's links stay focusable and visible to screen readers; no Escape
+   to close; the toggle has no `aria-expanded`.
+9. `100vh` in five places (breaks under mobile browser toolbars); no safe-area handling.
+
+Consistency and code quality
+10. ~255 inline `style={{}}` objects (Charts 40, Assistant 37, Onboarding 33,
+    Portfolio 30, Dashboard 16, ...), mostly one-off margins off any scale.
+11. Spacing in ~15 ad-hoc values (3-26px), six radii, 30+ font sizes.
+12. Fixed pixel widths in tables and rows (inputs 74-130px, 132/148px label
+    columns, a 342px trace column, an 84px slider readout).
+13. Duplicated patterns: three selectable-card implementations (persona,
+    checkbox, action); `.tooltip-row` declares `gap` twice.
+14. Text glyphs as icons: ✓ ⚠ ℹ ▲ ▼ ▸ ▾ ✕ × • in the shell, callouts, stat
+    deltas, surplus split, actions, assistant trace, portfolio rows and bullets.
+15. The accent is indigo `#6366f1` - the generic purple-blue look - and the pink
+    the product reads as is only the "short" status colour; indigo-to-green
+    gradients on the logo and assistant avatar.
+16. Headline figures use proportional digits, so values in a row don't line up.
+17. Dead code: `Money` and `ChartHeading` are exported and never used; an
+    orphaned doc comment in `ui.tsx`.
+
+States
+18. Loading is a spinner (app start, impact card) or blank space (risk ladder,
+    capabilities, sessions); no skeletons.
+19. No hover lift or pressed state on cards/buttons beyond a border change;
+    sliders have no focus style; disabled is opacity only.
+20. No entry motion; progress bars and numbers jump.
+
+Accessibility
+21. Heading levels skip h2 (page `h1` to card `h3`).
+22. 25 of 26 money inputs have an unlinked label (`htmlFor={undefined}`);
+    slider ids are derived from label text and can collide.
+23. The goal list has no arrow-key navigation or exposed selection state.
+24. Touch targets below 44px on phones: nav items 40px, buttons ~35px, small
+    buttons ~28px, icon and table buttons, disclosure summaries.
+25. Contrast: muted text `#6b7a9e` on cards is 3.99:1 (AA needs 4.5:1), 3.60:1
+    in the light theme; white on the indigo button 4.47:1; white on pink would be 2.69:1.
+
+Charts
+26. Tooltips other than "All goals" still draw Recharts' cursor (the fan's
+    vertical guide, the histogram's and comparison's grey blocks).
+27. Tooltip card is opaque and differs from the card style.
+
+### Phase 2 - design system (why: findings 10, 11, 15, 16, 25)
+
+All in `styles.css`, as tokens on `:root` with light-theme overrides:
+
+- Background elevations `--bg-0/1/2`; surfaces `--surface`, `--surface-glass`,
+  `-glass-strong`, `-glass-primary`, `-fallback`, `-inset`, `-hover`, `-sunken`;
+  borders `--border`, `-strong`, `-hover`.
+- Text `--text` / `--text-muted` / `--text-subtle`: 16.4, 8.7 and 5.8:1 on a
+  card (light theme 5.2:1 for the faintest). The old muted text was 3.99:1.
+- The accent is the pink the product already read as (`#fb7185`, `#e11d48` in
+  light), with `--accent-strong/-soft/-ring/-text` and `--on-accent` (dark navy
+  on pink is 7.1:1; white on pink would have been 2.69:1). Indigo and the
+  gradients are gone. Status: `--positive`, `--warning`, `--negative`, `--info`
+  plus `-soft` tints.
+- Spacing `--space-1..7` = 4/8/12/16/24/32/48; radius 8/12/16/24; three shadows,
+  one per elevation; motion 150/200/300ms on one ease-out curve.
+- Type scale: page, section, card, body, small, caption, label, stat. Headline
+  figures use tabular digits in the text face; table figures keep the mono face.
+- One icon set (`Icon`): stroke 1.75, 16/18px, replacing every text glyph.
+- Money is still formatted in exactly one place, `formatCompact` in
+  `@wealth/shared`. Nothing new formats a figure.
+
+### Phase 3 - glass and effects
+
+- Glass cards, sidebar, top bar, tooltips and onboarding: `rgba(20,27,50,.55)`,
+  `blur(14px) saturate(140%)` (with `-webkit-`), a 1px `rgba(255,255,255,.08)`
+  edge and an inset top highlight. There's a solid fallback under
+  `@supports not (backdrop-filter)`. A card inside glass never blurs again, so
+  there is one blur layer at a time, and blur is never animated.
+- A fixed, pointer-transparent radial glow sits behind the page.
+- Selected goal, persona, answer and risk-ladder row get an accent edge and a
+  soft glow.
+- Buttons come in primary, secondary, ghost, danger and icon variants, with a
+  1px lift on hover, a pressed state and a focus ring. Inputs, selects and
+  sliders get focus rings; the slider track fills to its value.
+- Progress bars grow in and ease to new values. Headline figures tween
+  (`AnimatedNumber`, 250ms) and settle on exactly the formatted value. Sections
+  rise in 50ms apart; grid items and the action list follow 40ms apart.
+- Loading shows skeletons, not spinners: app start, page restore, the impact
+  card, the sample personas.
+- `prefers-reduced-motion` switches all of it off.
+
+### Phase 4 - charts (findings 6, 26, 27)
+
+- Every `Tooltip` has `cursor={false}` and no easing lag, and the fan chart
+  draws no hover dots. Hovering any chart now shows the tooltip card and nothing
+  else. Verified by hovering every chart at 360, 390, 768, 1024 and 1440px for
+  two personas: 0 cursor shapes, 0 active dots, 0 active bars.
+- `ChartTooltip` is the glass card. Tick text was being *stroked* (a `stroke` in
+  the tick props outlines every glyph), which made axis labels look heavy; it
+  is now a muted `fill`.
+- Currency axes are sized from their labels, and Recharts' own label wrapping
+  is off: it measured labels in the body font and split "₹35.00 L" over two
+  lines with room to spare.
+- On phones, ticks are smaller and fewer and goal names shorter. The fan
+  chart's last year label and the comparison chart's "Today" label are no longer
+  clipped. The comparison chart is as tall as its rows need.
+- The allocation bar no longer dims the other segments on hover. The readout
+  above it stays.
+
+### Phase 5 - components and accessibility
+
+- `components/primitives/`: `Card`, `CardHeader`, `CardSection`, `Stat`,
+  `Badge`, `ProgressBar`, `ScoreRing`, `Callout`, `EmptyState`, `Skeleton` (+
+  `SkeletonCard`, `SkeletonStats`, `PageSkeleton`), `Icon`, `AnimatedNumber`,
+  `AssumptionList`, `FormField`, `MoneyInput`, `NumberInput`, `SliderField`.
+  `ui.tsx` re-exports them with the same props; `Empty` became `EmptyState`,
+  and the unused `Money` and `ChartHeading` were deleted.
+- `GoalList` / `GoalListItem` (memoised): one tab stop; arrows, Home and End
+  move focus without selecting; Enter or Space selects.
+- Assistant: `ReasoningTrace`, `TraceIcon` and `AttachmentCard` split out of
+  the page. Charts: `ChartTooltip`, `LegendItem`. `hooks/useMediaQuery`.
+- Inline styles went from 216 lines to 18, and every one left sets a value
+  computed from data or a prop (bar widths, series colours, chart heights).
+- Accessibility:
+  - Headings run h1, h2, h3 without skipping.
+  - Every control has a name: money fields link their label with `useId`, and
+    table inputs carry `aria-label`s.
+  - Radio groups are labelled.
+  - Disclosure toggles have `aria-expanded` and `aria-controls`; filters and
+    personas have `aria-pressed`.
+  - The chat is a `role="log"` that announces new turns, not tokens. The trace
+    is a labelled `aside`.
+  - Status icons carry screen-reader text.
+  - Touch targets are 44px on phones and coarse pointers.
+- Microcopy: "Short by ₹X", "You're on track", "Still to find by the goal date".
+
+### Phase 6 - responsive (findings 1-5, 8, 9, 12)
+
+- The shell is mobile-first. Below 900px the navigation is a drawer: hidden
+  from the tab order when closed, closed with Escape, and focus returns to the
+  toggle. It uses `dvh` with a `vh` fallback, safe-area insets and
+  `viewport-fit=cover`.
+- Grids lay out by the width of their container (container queries on the page,
+  card bodies and the onboarding body). Cards follow their content height; KPI
+  rows stay equal height on purpose.
+- Content is centred with a cap, so there is no dead band at 1920px.
+- Fixed during the final audit:
+  - Portfolio scrolled sideways. The visually hidden "Remove" column headers
+    escaped their non-positioned table scroller, so scrollers are now
+    positioned.
+  - Expense and drift rows squeezed their bars in narrow cards.
+  - The goal edit form had no gaps; this was my own regression from this pass.
+  - Page-header actions sat on the bottom line of the header.
+- Final audit covered every page at 360, 390, 768, 1024, 1280, 1440 and 1920px,
+  in seven profile states, plus onboarding. It found 0 horizontal scroll, 0
+  elements escaping their card, 0 stretched cards, 0 touch targets under 44px
+  and 0 console errors.
+- Behaviour checks all pass: goal list keys, drawer focus and Escape, focus
+  ring, nothing animating under reduced motion, blur present and the fallback
+  rule in place.
+
+### Phase 7 - finish
+
+- One accent; colour only for status.
+- Icons instead of glyphs; no gradients or rainbow.
+- Nested corners one step tighter than their parent's; shadows per elevation.
+- The focal card of a page has more presence: the impact card on the
+  Dashboard, the selected goal, the scenario result.
+
+### Display bugs fixed along the way (no figure changed)
+
+- Assistant: after reopening a conversation, the "grounded" badge could turn
+  amber while every figure was grounded. It took its colour from the live
+  turn's checks and its count from the displayed ones.
+- Motion: a grid and its own cards both ran the entrance animation, so offsets
+  compounded, and later sections started before earlier ones.
+- Table figures could break across lines ("+" on one line, "₹14.7k" on the next).
+
+## UI redesign and polish - summary  [done]
+Files touched: `packages/web/index.html`, `src/App.tsx`, `src/styles.css`
+(rewritten), `src/components/{Shell,ui,ImpactHero,SurplusSplit,RiskLadder}.tsx`,
+`src/components/charts/Charts.tsx`, every page in `src/pages/`,
+`test/render.test.tsx`; new `src/components/primitives/*` (13 files),
+`src/components/GoalList.tsx`, `src/hooks/useMediaQuery.ts`.
+Decisions I made without asking:
+- The accent is the existing pink, and indigo is gone. The brief said "keep
+  the existing pink/red".
+- The focal card on the Dashboard is the impact card, and on the Scenario Lab
+  the scenario result. The brief named only the selected goal.
+- Headline figures went back to the text face with tabular digits; tables and
+  axes keep the mono face.
+- Axis tick text is `fill`, not `stroke`.
+- The hover dimming on the allocation bar was removed as a hover highlight.
+- The expense list stacks its label on phones, as it did before the pass.
+- Arrows in the goal list move focus without selecting, because selecting
+  resets the test sliders.
+Tests added: 3 in `test/render.test.tsx`, each checked by breaking the code
+on purpose:
+- every page has one h1 and no skipped heading level;
+- every form control has an accessible name, for every persona and an empty
+  profile;
+- the goal list is one tab stop, on the selected goal.
+
+Real output: `ℹ tests 42` / `ℹ pass 42` / `ℹ fail 0` (web; shared 106, server
+91, 239 in all). `npm run verify` and `npm run lint` (`--max-warnings 0`) exit
+0, and `npm run synth` succeeds.
+Anything I deliberately left out:
+- The render tests print react-router's `useLayoutEffect` SSR warning. It
+  comes from `MemoryRouter`, was there before this pass (79 lines, now 195
+  because the new tests render more pages), and the app never server-renders.
+- The skeleton shimmer is a 1.2s loop, deliberately longer than the 300ms
+  transition cap.
+- The reduced-motion override uses `!important` on purpose.
+- The "short" status colour stays the accent pink, by design.
