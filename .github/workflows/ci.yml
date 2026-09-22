@@ -1,7 +1,7 @@
 name: CI
 
 # Runs on every push and pull request. This is the gate: nothing reaches the
-# deploy workflow without passing here first.
+# Pages workflow without passing here first.
 on:
   push:
     branches: [main, develop]
@@ -51,14 +51,6 @@ jobs:
 
       - name: Build
         run: npm run build
-
-      # The stack must synthesize before a deploy is attempted. Catching an IaC
-      # error here costs seconds; catching it mid-deploy costs a rollback.
-      - name: Synthesize infrastructure
-        run: npm run synth --workspace @wealth/infra
-        env:
-          CDK_DEFAULT_ACCOUNT: '000000000000'
-          CDK_DEFAULT_REGION: ap-south-1
 
       - name: Upload build artefacts
         uses: actions/upload-artifact@v4

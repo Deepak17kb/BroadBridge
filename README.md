@@ -112,7 +112,7 @@ docs/        Architecture, API reference, demo scripts, slide deck, demo recordi
 
 ```bash
 npm run dev         # API on :4000 and the client on :5173, both watching
-npm run typecheck   # All four packages
+npm run typecheck   # All three packages
 npm test            # 239 tests: engine arithmetic, API + agent, page renders
 npm run lint        # ESLint, zero warnings tolerated
 npm run build       # Server bundle + static client bundle

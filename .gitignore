@@ -7,11 +7,6 @@ build/
 .vite/
 *.tsbuildinfo
 
-# Infrastructure
-cdk.out/
-.cdk.staging/
-infra/cdk-outputs.json
-
 # Environment — never commit credentials
 .env
 .env.*
