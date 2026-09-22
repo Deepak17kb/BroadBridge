@@ -293,34 +293,43 @@ export function Assistant() {
 
   return (
     <div className="stack">
-      <header className="page-head">
-        <div className="row-between">
-          <div>
-            <h1>AI Assistant</h1>
-            <p>
-              Ask about your money in plain language. The assistant reads your actual position, runs
-              the planning engine, and shows every step it took to reach an answer.
-            </p>
+      {/*
+        * The masthead states what makes this assistant different from a chat
+        * box: it is wired to the engine and it shows its working. The three
+        * figures are the evidence for that claim, so they are given as
+        * figures rather than left inside the sentence.
+        */}
+      <header className="assistant-hero">
+        <div className="assistant-hero-main">
+          <div className="assistant-hero-badge">
+            <span className="assistant-hero-pulse" aria-hidden="true" />
+            Grounded in your plan
           </div>
-          {capabilities && (
-            <div className="page-head-aside">
-              <Badge
-                tone={
-                  capabilities.engine === 'deterministic'
-                    ? 'warning'
-                    : capabilities.engine === 'bedrock'
-                      ? 'positive'
-                      : 'info'
-                }
-              >
-                {ENGINE_TEXT[capabilities.engine]}
-              </Badge>
-              <div className="text-xs text-subtle">
-                {capabilities.tools.length} tools · {capabilities.knowledgeBase.length} reference notes
-              </div>
-            </div>
-          )}
+          <h1>
+            Ask anything about <span className="assistant-hero-em">your</span> money
+          </h1>
+          <p>
+            Plain language in, real arithmetic out. The assistant reads your actual position, runs
+            the same planning engine as every screen here, and shows every step it took.
+          </p>
         </div>
+
+        {capabilities && (
+          <dl className="assistant-hero-stats">
+            <div>
+              <dt>Tools it can call</dt>
+              <dd>{capabilities.tools.length}</dd>
+            </div>
+            <div>
+              <dt>Reference notes</dt>
+              <dd>{capabilities.knowledgeBase.length}</dd>
+            </div>
+            <div>
+              <dt>Reasoning engine</dt>
+              <dd className="assistant-hero-engine">{ENGINE_TEXT[capabilities.engine]}</dd>
+            </div>
+          </dl>
+        )}
       </header>
 
       {capabilities?.engine === 'deterministic' && (
@@ -454,7 +463,7 @@ export function Assistant() {
             {streaming && (
               <div className="msg assistant">
                 <div className="msg-avatar" aria-hidden="true">
-                  AI
+                  <Icon name="sparkle" size={16} />
                 </div>
                 <div className="msg-body">
                   {streamedText ? (
@@ -514,9 +523,6 @@ export function Assistant() {
                 </button>
               )}
             </form>
-            <p className="text-xs text-subtle mt-2">
-              Synthetic data, illustrative projections, not financial advice.
-            </p>
           </div>
         </div>
 
@@ -743,7 +749,7 @@ function ReasoningTrace({
 }
 
 /** One turn, plus any structured cards the agent attached to it. */
-function MessageBubble({ message, currency }: { message: AgentMessage; currency: Currency }) {
+export function MessageBubble({ message, currency }: { message: AgentMessage; currency: Currency }) {
   if (message.role === 'user') {
     return (
       <div className="msg user">
@@ -762,7 +768,7 @@ function MessageBubble({ message, currency }: { message: AgentMessage; currency:
   return (
     <div className="msg assistant">
       <div className="msg-avatar" aria-hidden="true">
-        AI
+        <Icon name="sparkle" size={16} />
       </div>
       <div className="msg-body">
         <div className="msg-bubble" dangerouslySetInnerHTML={{ __html: renderMarkdown(message.content) }} />

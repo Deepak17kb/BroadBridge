@@ -2,8 +2,9 @@ import type { ReactNode } from 'react';
 
 /**
  * The card: glass surface, a header with title, subtitle and actions, and a
- * body that spaces its blocks on the spacing scale. Its height follows its
- * content - grids never stretch it (see `.grid` in the stylesheet).
+ * body that spaces its blocks on the spacing scale. In a grid it takes the
+ * height of its row, so a row of cards shares one baseline; a card that must
+ * size to its own content opts out with `self-start` (see the stylesheet).
  */
 export function Card({
   title,

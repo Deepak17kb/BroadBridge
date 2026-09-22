@@ -27,7 +27,8 @@ import {
   Slider,
   Stat,
 } from '../components/ui';
-import { GoalFundingChart, MonteCarloFan, TableToggle } from '../components/charts/Charts';
+import { MonteCarloFan, TableToggle } from '../components/charts/Charts';
+import { GoalBullets } from '../components/charts/GoalBullets';
 import { GoalList } from '../components/GoalList';
 import { SurplusSplit } from '../components/SurplusSplit';
 
@@ -235,22 +236,45 @@ export function Goals() {
             </Card>
           </div>
 
-          <Card title="All goals" subtitle="How much of each goal your plan is projected to fund">
-            <GoalFundingChart projections={snapshot.goalProjections} currency={currency} />
+          <Card
+            title="All goals"
+            subtitle="Soonest first, each measured against the mark where it is fully funded"
+          >
+            <GoalBullets projections={snapshot.goalProjections} currency={currency} />
           </Card>
 
           <div className="grid grid-sidebar-left">
-            {/* Goal list. `self-start` keeps it as tall as its goals; the grid
-                would otherwise stretch it to the detail column beside it. */}
-            <Card title="Your goals" subtitle="Select one to model it" className="self-start">
-              <GoalList
-                projections={snapshot.goalProjections}
-                goals={profile.goals}
-                selectedId={selectedId}
-                currency={currency}
-                onSelect={selectGoal}
+            {/*
+              * The column, not the card, is what must not stretch: `sticky-aside`
+              * sizes it to its content so it can travel beside the taller detail
+              * panel. `self-start` must NOT go on the card itself any more - in a
+              * flex column that is the cross axis, so it shrank each card to the
+              * width of its own text instead of leaving its height alone.
+              */}
+            <div className="stack sticky-aside">
+              <Card title="Your goals" subtitle="Select one to model it">
+                <GoalList
+                  projections={snapshot.goalProjections}
+                  goals={profile.goals}
+                  selectedId={selectedId}
+                  currency={currency}
+                  onSelect={selectGoal}
+                />
+              </Card>
+
+              {/*
+                * The column used to end here, leaving a tall band of empty
+                * card beside the detail panel. This is the question the
+                * sliders opposite raise and nothing on the page answered:
+                * whether there is any money left to raise a contribution
+                * with, before you drag one.
+                */}
+              <FundingCapacity
+                surplus={snapshot.cashflow.monthlySurplus}
+                committed={monthlyCommitted}
+                money={money}
               />
-            </Card>
+            </div>
 
             {/* Detail and live model. */}
             {selected && projection ? (
@@ -593,5 +617,64 @@ export function Goals() {
         </>
       )}
     </div>
+  );
+}
+
+/**
+ * What is left of the monthly surplus once every goal is funded.
+ *
+ * The sliders opposite let you raise a contribution; this is the constraint
+ * they are drawn against. Shown as one bar because the question is
+ * part-to-whole - how much of what you have is already spoken for - and as a
+ * signed figure because being over-committed is a different problem from
+ * having room, not just a smaller number.
+ */
+function FundingCapacity({
+  surplus,
+  committed,
+  money,
+}: {
+  surplus: number;
+  committed: number;
+  money: (v: number) => string;
+}) {
+  const free = surplus - committed;
+  const over = free < 0;
+  // Against whichever is larger, so an over-committed bar still fits its track.
+  const scale = Math.max(surplus, committed, 1);
+
+  return (
+    <Card title="Funding capacity" subtitle="What is free before you raise anything">
+      <div className="stack-sm">
+        <div className="row-between">
+          <span className="text-sm text-muted">Monthly surplus</span>
+          <span className="text-sm num strong">{money(surplus)}</span>
+        </div>
+        <div className="row-between">
+          <span className="text-sm text-muted">Committed to goals</span>
+          <span className="text-sm num">{money(committed)}</span>
+        </div>
+
+        <div className="bar" role="img" aria-label={`${money(committed)} of ${money(surplus)} committed`}>
+          <span
+            className={`bar-fill ${over ? 'negative' : 'positive'}`}
+            style={{ width: `${Math.min(100, (committed / scale) * 100)}%` }}
+          />
+        </div>
+
+        <hr className="divider" />
+        <div className="row-between">
+          <span className="text-sm strong">{over ? 'Over-committed by' : 'Still free'}</span>
+          <span className={`text-sm num strong ${over ? 'text-negative' : 'text-positive'}`}>
+            {money(Math.abs(free))}
+          </span>
+        </div>
+        <p className="text-xs text-subtle m-0">
+          {over
+            ? 'Your goal contributions exceed the surplus, so something has to give before any of them can rise.'
+            : 'Raising a contribution by more than this would have to come out of spending.'}
+        </p>
+      </div>
+    </Card>
   );
 }

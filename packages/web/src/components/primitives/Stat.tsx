@@ -11,6 +11,14 @@ const TONE_CLASS: Record<Tone, string> = {
   warning: 'text-warning',
 };
 
+/** The hue this figure lends the cursor's spotlight while it is over it. */
+const TONE_SPOT: Record<Tone, string | undefined> = {
+  neutral: undefined,
+  positive: 'var(--positive)',
+  negative: 'var(--negative)',
+  warning: 'var(--warning)',
+};
+
 /** A labelled figure with an optional change and footnote. */
 export function Stat({
   label,
@@ -26,7 +34,7 @@ export function Stat({
   tone?: Tone;
 }) {
   return (
-    <div className="stat">
+    <div className="stat" data-spot={TONE_SPOT[tone]}>
       <div className="stat-label">{label}</div>
       <div className={`stat-value ${TONE_CLASS[tone]}`.trim()}>{value}</div>
       {delta && <Delta {...delta} />}

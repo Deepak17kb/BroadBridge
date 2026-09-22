@@ -1,5 +1,12 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32">
-  <rect width="32" height="32" rx="8" fill="#0b1020"/>
-  <path d="M6 22 L12 14 L18 18 L26 8" stroke="#34d399" stroke-width="2.5" fill="none" stroke-linecap="round" stroke-linejoin="round"/>
-  <circle cx="26" cy="8" r="2.5" fill="#34d399"/>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32" role="img" aria-label="Wealth Navigator">
+  <defs>
+    <linearGradient id="tile" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0%" stop-color="#3bf0bd"/>
+      <stop offset="100%" stop-color="#00e0a4"/>
+    </linearGradient>
+  </defs>
+  <rect width="32" height="32" rx="9" fill="url(#tile)"/>
+  <!-- A cartographer's north arrow: the shaded half, then the lit half. -->
+  <path d="M16 4.6 9 25.8 16 19.6Z" fill="#04241c" fill-opacity="0.42"/>
+  <path d="M16 4.6 23 25.8 16 19.6Z" fill="#04241c"/>
 </svg>

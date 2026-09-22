@@ -11,7 +11,16 @@ import {
 } from '@wealth/shared';
 import { api, type PersonaSummary } from '../lib/api';
 import { useProfile } from '../state/ProfileContext';
-import { Badge, Callout, Icon, MoneyInput, NumberInput, ScoreRing, Skeleton } from '../components/ui';
+import {
+  Badge,
+  BrandMark,
+  Callout,
+  Icon,
+  MoneyInput,
+  NumberInput,
+  ScoreRing,
+  Skeleton,
+} from '../components/ui';
 
 /**
  * Onboarding.
@@ -188,7 +197,7 @@ export function Onboarding() {
           <div className="row-between">
             <div className="row gap-3">
               <div className="brand-mark" aria-hidden="true">
-                <Icon name="trend" size={18} />
+                <BrandMark size={20} />
               </div>
               <div>
                 <h1 className="onboarding-title">AI Wealth Navigator</h1>

@@ -152,8 +152,10 @@ npm install
 npm run build           # both bundles must exist before synth
 
 cd infra
-npx cdk deploy -c stage=prod
+npx cdk deploy WealthNavigator-prod -c stage=prod
 ```
+
+Name the stack: the app also defines the CI deployment role (`WealthNavigatorDeployRole-<stage>`, see Part 3), and CDK will not choose between two stacks for you.
 
 Roughly 8–12 minutes on a first deploy, most of it CloudFront propagation.
 
@@ -193,9 +195,9 @@ If `/api/ready` reports `"store":"memory"`, the Lambda could not reach DynamoDB.
 ### Stages
 
 ```bash
-npx cdk deploy -c stage=dev        # destroyable, debug logs, cheapest price class
-npx cdk deploy -c stage=staging
-npx cdk deploy -c stage=prod       # retained table, PITR, 30-day logs, all edges
+npx cdk deploy WealthNavigator-dev -c stage=dev          # destroyable, debug logs, cheapest price class
+npx cdk deploy WealthNavigator-staging -c stage=staging
+npx cdk deploy WealthNavigator-prod -c stage=prod        # retained table, PITR, 30-day logs, all edges
 ```
 
 Each stage is a separate stack with its own table and distribution. Production retains the table and bucket on stack deletion; other stages destroy them.
@@ -211,7 +213,7 @@ Other context flags:
 
 ```bash
 cd infra
-npx cdk destroy -c stage=dev
+npx cdk destroy WealthNavigator-dev -c stage=dev
 ```
 
 Production retains the table and bucket by design; delete them manually if you intend to.
@@ -245,12 +247,43 @@ The smoke job exists because of a real bug: a clean typecheck and a clean build 
 
 ### One-time setup
 
-**1. OIDC trust.** Add GitHub as an identity provider:
+**1. Put the repository on GitHub.** CI cannot run until it is there.
+
+```bash
+# With the GitHub CLI - creates the repository and pushes in one step
+gh repo create ai-wealth-navigator --private --source=. --remote=origin --push
+
+# Or by hand, after creating an empty repository in the GitHub UI
+git remote add origin https://github.com/<OWNER>/ai-wealth-navigator.git
+git push -u origin main
+```
+
+Then replace `OWNER/REPO` in the two badge URLs at the top of `README.md`.
+
+**2. The deployment role.** It is code in this repository - `infra/lib/github-deploy-role-stack.ts`, stack `WealthNavigatorDeployRole-<stage>` - and is deployed once per account, with your own credentials:
+
+```bash
+cd infra
+npx cdk bootstrap                  # once per account and region, if never done
+
+# Pass your real repository, or the trust policy is worthless.
+npx cdk deploy WealthNavigatorDeployRole-staging \
+  -c stage=staging \
+  -c githubRepo=<OWNER>/ai-wealth-navigator
+
+# If the account already has a GitHub OIDC provider (only one per issuer is
+# allowed per account), pass it instead of letting the stack create one:
+#   -c oidcProviderArn=arn:aws:iam::<ACCOUNT>:oidc-provider/token.actions.githubusercontent.com
+```
+
+The role trusts exactly two subjects per stage - `repo:<OWNER>/<REPO>:ref:refs/heads/main` and `repo:<OWNER>/<REPO>:environment:<stage>` - and has no AWS permissions of its own beyond assuming the four CDK bootstrap roles and reading the bootstrap version parameter. A deploy therefore runs with exactly what `cdk bootstrap` provisioned, and revoking the pipeline is one role deletion. The stack outputs `DeployRoleArn`.
+
+Or create both by hand. Add GitHub as an identity provider:
 
 - Provider URL: `https://token.actions.githubusercontent.com`
 - Audience: `sts.amazonaws.com`
 
-**2. A deployment role** trusting your repository:
+and a deployment role trusting your repository:
 
 ```json
 {
@@ -271,10 +304,11 @@ The smoke job exists because of a real bug: a clean typecheck and a clean build 
 
 | Type | Name | Value |
 |---|---|---|
-| Secret | `AWS_DEPLOY_ROLE_ARN` | `arn:aws:iam::<account-id>:role/<role-name>` |
-| Variable | `AWS_REGION` | e.g. `ap-south-1` |
+| Secret | `AWS_DEPLOY_ROLE_ARN` | the stack's `DeployRoleArn` output, or your own role's ARN |
+| Variable | `AWS_REGION` | e.g. `ap-south-1` (the default when unset) |
+| Environment | `dev` / `staging` / `prod` | must exist for a manual dispatch; the stack's trust policy names them |
 
-Add an `environment` per stage with required reviewers if you want manual approval before production.
+Add required reviewers to an environment if you want manual approval before production.
 
 ### AWS CodeBuild
 

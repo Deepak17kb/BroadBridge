@@ -9,6 +9,8 @@ import {
 } from '@wealth/shared';
 import { api } from '../lib/api';
 import { useLoadedProfile, useProfile } from '../state/ProfileContext';
+import { RiskDial } from '../components/RiskDial';
+import { useRiskLadder } from '../components/RiskLadder';
 import {
   Badge,
   Callout,
@@ -16,8 +18,6 @@ import {
   Icon,
   MoneyInput,
   NumberInput,
-  ProgressBar,
-  ScoreRing,
   Stat,
 } from '../components/ui';
 import { ExpenseBars } from '../components/charts/Charts';
@@ -42,6 +42,9 @@ export function Profile() {
 
   // Scored from the live draft so the panel updates on every answer.
   const risk = scoreRisk(profile);
+
+  // Lets a hovered band on the dial say what that mix returns and costs.
+  const ladder = useRiskLadder(profile.id);
 
   return (
     <div className="stack">
@@ -353,29 +356,14 @@ export function Profile() {
 
         {/* Live effect of the edits. */}
         <div className="stack sticky-aside">
-          <Card title="Your risk profile">
-            <div className="row gap-4">
-              <ScoreRing score={risk.effectiveScore} size={104} />
-              <div className="flex-1">
-                <Badge tone="accent">{risk.bucket}</Badge>
-                <div className="stack-sm mt-3">
-                  <div>
-                    <div className="row-between text-xs">
-                      <span className="text-muted">Willingness</span>
-                      <span className="num">{risk.toleranceScore}</span>
-                    </div>
-                    <ProgressBar value={risk.toleranceScore / 100} tone="positive" label="Willingness" />
-                  </div>
-                  <div>
-                    <div className="row-between text-xs">
-                      <span className="text-muted">Ability</span>
-                      <span className="num">{risk.capacityScore}</span>
-                    </div>
-                    <ProgressBar value={risk.capacityScore / 100} tone="warning" label="Ability" />
-                  </div>
-                </div>
-              </div>
-            </div>
+          <Card title="Your risk profile" subtitle="Where you land, and which of the two decides it">
+            <RiskDial
+              bucket={risk.bucket}
+              willingness={risk.toleranceScore}
+              ability={risk.capacityScore}
+              ladder={ladder}
+              size={320}
+            />
             <hr className="divider" />
             <ul className="bullets text-xs text-muted">
               {risk.drivers.map((d) => (

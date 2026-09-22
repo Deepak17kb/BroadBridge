@@ -178,13 +178,25 @@ test('entered ages continue only when they make sense', () => {
   assert.deepEqual(checkAges({ age: 30, retirementAge: 120 }).problems, ['Retirement age can be at most 100.']);
 });
 
-test('the goal list card sizes to its goals instead of stretching to the column beside it', () => {
-  // Grid items stretch to the row by default, which left the card as tall as
-  // the detail column - over a thousand pixels of empty card below three goals.
+test('the goal list sits in an aside that sizes to its content, not the column beside it', () => {
+  /*
+   * Grid items stretch to the row by default, which left the card as tall as
+   * the detail column - over a thousand pixels of empty card below three goals.
+   *
+   * The fix moved from `self-start` on the card to `sticky-aside` on the
+   * column that holds it. That distinction is the point of this test: in a
+   * flex column `self-start` acts on the cross axis, so leaving it on the card
+   * shrank every goal to the width of its own text.
+   */
   const html = render(structuredClone(PERSONAS[0]!.profile), Goals);
   assert.match(
     html,
-    /<section class="card self-start"><header class="card-head"><div class="card-heading"><h2 class="card-title">Your goals<\/h2>/,
+    /<div class="stack sticky-aside"><section class="card"><header class="card-head"><div class="card-heading"><h2 class="card-title">Your goals<\/h2>/,
+  );
+  assert.doesNotMatch(
+    html,
+    /<section class="card[^"]*self-start[^"]*">[\s\S]{0,200}Your goals/,
+    'self-start on the card itself would collapse its width inside the flex column',
   );
 });
 

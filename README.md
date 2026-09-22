@@ -1,6 +1,6 @@
 # AI Wealth Navigator
 
-<!-- Replace OWNER/REPO once the GitHub remote exists; see PROGRESS.md for the exact steps. -->
+<!-- Replace OWNER/REPO once the GitHub remote exists; docs/DEPLOYMENT.md (Part 3, one-time setup) has the exact steps. -->
 [![CI](https://github.com/OWNER/REPO/actions/workflows/ci.yml/badge.svg)](https://github.com/OWNER/REPO/actions/workflows/ci.yml)
 [![Deploy](https://github.com/OWNER/REPO/actions/workflows/deploy.yml/badge.svg)](https://github.com/OWNER/REPO/actions/workflows/deploy.yml)
 ![Tests](https://img.shields.io/badge/tests-117%20passing-brightgreen)
@@ -111,7 +111,7 @@ npm run deploy      # Build, then deploy to AWS
 npm run build
 cd infra
 npx cdk bootstrap                  # once per account and region
-npx cdk deploy -c stage=prod
+npx cdk deploy WealthNavigator-prod -c stage=prod
 ```
 
 The stack outputs an `AppUrl`. Requires Claude model access enabled in Amazon Bedrock for your region — without it the deployment still works and runs the deterministic engine, and the deploy workflow prints a warning saying so.

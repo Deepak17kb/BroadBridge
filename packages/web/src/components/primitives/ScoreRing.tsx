@@ -33,6 +33,9 @@ export function ScoreRing({ score, grade, size = 132 }: { score: number; grade?:
           strokeLinecap="round"
           strokeDasharray={circumference}
           strokeDashoffset={offset}
+          /* The sweep starts from empty, which is one full circumference of
+             dash offset; the stylesheet animates to the value above. */
+          style={{ ['--arc-len' as string]: circumference }}
         />
       </svg>
       <div className="ring-center">

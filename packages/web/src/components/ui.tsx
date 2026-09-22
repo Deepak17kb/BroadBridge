@@ -5,6 +5,7 @@
 export { AnimatedNumber } from './primitives/AnimatedNumber';
 export { AssumptionList } from './primitives/AssumptionList';
 export { Badge, type BadgeTone } from './primitives/Badge';
+export { BrandMark } from './primitives/BrandMark';
 export { Callout } from './primitives/Callout';
 export { Card, CardHeader, CardSection } from './primitives/Card';
 export { EmptyState } from './primitives/EmptyState';

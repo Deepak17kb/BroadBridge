@@ -2,7 +2,9 @@ import { useEffect, useRef, useState, type ReactNode } from 'react';
 import { NavLink, useLocation } from 'react-router-dom';
 import { useProfile } from '../state/ProfileContext';
 import { api, type HealthInfo } from '../lib/api';
-import { Icon, type IconName } from './ui';
+import { BrandMark, Icon, type IconName } from './ui';
+import { AssistantDock } from './AssistantDock';
+import { CommandPalette } from './CommandPalette';
 
 /**
  * Application shell: navigation, top bar, and the always-visible
@@ -100,11 +102,11 @@ export function Shell({ children, title }: { children: ReactNode; title: string 
       <aside id="app-nav" className={`sidebar ${navOpen ? 'open' : ''}`.trim()} ref={navRef}>
         <div className="brand">
           <div className="brand-mark" aria-hidden="true">
-            <Icon name="trend" size={18} />
+            <BrandMark size={20} />
           </div>
           <div>
             <div className="brand-name">Wealth Navigator</div>
-            <div className="brand-sub">AI Financial Wellness</div>
+            <div className="brand-sub">Financial wellness</div>
           </div>
         </div>
 
@@ -132,11 +134,42 @@ export function Shell({ children, title }: { children: ReactNode; title: string 
         </nav>
 
         <div className="sidebar-foot">
-          {engine && (
-            <div className="engine-card" title={engine.title}>
-              <div className="stat-label">Reasoning engine</div>
-              <span className={`badge ${engine.tone}`}>{engine.text}</span>
-              {health?.model && <div className="text-xs text-subtle num">{health.model}</div>}
+          {snapshot && (
+            <div className="status-card">
+              <div className="status-row">
+                <span className="status-live" aria-hidden="true" />
+                <span className="status-live-text">Live</span>
+                {engine && (
+                  <span className="status-engine" title={engine.title}>
+                    {engine.text}
+                  </span>
+                )}
+              </div>
+
+              <div className="status-score">
+                <span className="status-score-value">{snapshot.wellness.total}</span>
+                <span className="status-score-grade">
+                  Grade {snapshot.wellness.grade}
+                  <span className="status-score-label">Wellness score</span>
+                </span>
+              </div>
+
+              <div className="status-meter" aria-hidden="true">
+                <span
+                  className="status-meter-fill"
+                  style={{ width: `${Math.max(0, Math.min(100, snapshot.wellness.total))}%` }}
+                />
+              </div>
+
+              <div className="status-foot">
+                {urgentActions > 0 ? (
+                  <>
+                    <strong className="text-warning">{urgentActions}</strong> need you now
+                  </>
+                ) : (
+                  'Nothing urgent'
+                )}
+              </div>
             </div>
           )}
           {profile && (
@@ -166,6 +199,22 @@ export function Shell({ children, title }: { children: ReactNode; title: string 
           <span className="topbar-title">{title}</span>
           <span className="topbar-spacer" />
 
+          {/* The palette answers a keyboard shortcut; this is how anyone who
+              does not already know that finds out it exists. */}
+          <button
+            className="palette-trigger"
+            onClick={() =>
+              window.dispatchEvent(
+                new KeyboardEvent('keydown', { key: 'k', ctrlKey: true, bubbles: true }),
+              )
+            }
+            aria-label="Open the command palette"
+          >
+            <Icon name="search" size={16} />
+            <span className="palette-trigger-text">Search or jump to…</span>
+            <kbd className="kbd">Ctrl K</kbd>
+          </button>
+
           <SaveState state={saveState} />
 
           <button
@@ -178,14 +227,11 @@ export function Shell({ children, title }: { children: ReactNode; title: string 
           </button>
         </header>
 
-        {profile?.isSynthetic && (
-          <div className="synthetic-banner">
-            Synthetic demonstration data · illustrative projections, not financial advice
-          </div>
-        )}
-
         <main className="page">{children}</main>
       </div>
+
+      <AssistantDock />
+      <CommandPalette />
     </div>
   );
 }

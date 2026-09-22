@@ -79,9 +79,10 @@ export function Actions() {
       <header className="page-head">
         <h1>Next Best Actions</h1>
         <p>
-          Ranked by impact against effort and urgency, and ordered by the planning waterfall — protect
-          first, then clear expensive debt, then fund goals, then optimise. Each one shows its own
-          arithmetic and the assumptions behind it.
+          These are <strong>recommendations</strong>, ranked by impact against effort and urgency and
+          ordered by the planning waterfall — protect first, then clear expensive debt, then fund
+          goals, then optimise. Each one shows the arithmetic and the assumptions behind why it is
+          advised, so you can disagree with it on the numbers rather than take it on trust.
         </p>
       </header>
 
@@ -173,8 +174,16 @@ export function Actions() {
                       {index + 1}
                     </span>
                     <div className="action-body">
+                      {/* Names the list's standing: these are recommendations
+                          the engine ranked, not instructions or obligations. */}
+                      <span className="action-kicker">
+                        {index === 0 ? 'Recommended first' : 'Recommended'}
+                      </span>
                       <h2 className="action-title">{action.title}</h2>
-                      <p className="action-why">{action.why}</p>
+                      <p className="action-why">
+                        <span className="action-why-lead">Why this is advised: </span>
+                        {action.why}
+                      </p>
                       <div className="row-wrap mt-2">
                         <Badge tone={CATEGORY_TONE[action.category]}>{CATEGORY_LABELS[action.category]}</Badge>
                         <Badge tone={action.effort === 'low' ? 'positive' : action.effort === 'medium' ? 'warning' : 'negative'}>

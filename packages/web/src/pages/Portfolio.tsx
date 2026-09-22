@@ -175,7 +175,7 @@ export function Portfolio() {
               <AssumptionList assumptions={portfolio.assumptions} title="How these figures were computed" />
             </Card>
 
-            <div className="stack">
+            <div className="stack sticky-aside">
               <Card title="Diversification" subtitle="Measured three ways, because they fail independently">
                 <div className="stack-sm">
                   <div className="row-between">

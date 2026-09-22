@@ -17,7 +17,6 @@ import {
   Callout,
   Card,
   ProgressBar,
-  ScoreRing,
   Stat,
 } from '../components/ui';
 import { ImpactHero } from '../components/ImpactHero';
@@ -25,10 +24,12 @@ import {
   AllocationBar,
   AllocationLegend,
   ExpenseBars,
-  GoalFundingChart,
   PillarMeters,
   TableToggle,
+  WellnessRadar,
 } from '../components/charts/Charts';
+import { WellnessGauge } from '../components/charts/WellnessGauge';
+import { GoalBullets } from '../components/charts/GoalBullets';
 
 /**
  * The dashboard.
@@ -105,6 +106,7 @@ export function Dashboard() {
       {/* Headline: one score, its drivers, and the immediate next step. */}
       <div className="grid grid-sidebar">
         <Card
+          className="card-fill"
           title="Financial wellness"
           subtitle={
             wellness.dataComplete
@@ -113,8 +115,8 @@ export function Dashboard() {
           }
         >
           <div className="wellness-summary">
-            <div className="stack-sm">
-              <ScoreRing score={wellness.total} grade={wellness.dataComplete ? wellness.grade : undefined} />
+            <div className="stack-sm wellness-score">
+              <WellnessGauge wellness={wellness} />
               {wellness.dataComplete ? (
                 <Badge tone={wellness.total >= 65 ? 'positive' : wellness.total >= 45 ? 'warning' : 'negative'}>
                   {wellness.total >= 80
@@ -130,9 +132,12 @@ export function Dashboard() {
                 <Badge tone="warning">Incomplete</Badge>
               )}
             </div>
-            <div className="wellness-pillars">
-              <PillarMeters wellness={wellness} />
+            <div className="wellness-shape">
+              <WellnessRadar wellness={wellness} />
             </div>
+          </div>
+          <div className="wellness-pillars fill-rest">
+            <PillarMeters wellness={wellness} />
           </div>
           {!wellness.dataComplete && (
             <Callout tone="info">
@@ -257,7 +262,7 @@ export function Dashboard() {
       {/* Goals: are these actually going to happen? */}
       <Card
         title="Goal funding"
-        subtitle={`${onTrack} of ${goalProjections.length} fully funded on current behaviour. Targets are shown in the money of the year you need them, not today's.`}
+        subtitle={`${onTrack} of ${goalProjections.length} fully funded on current behaviour. Soonest first, each measured against the mark where it is fully funded.`}
         actions={
           <Link to="/goals" className="btn btn-sm">
             Manage goals
@@ -270,7 +275,7 @@ export function Dashboard() {
           </p>
         ) : (
           <>
-            <GoalFundingChart projections={goalProjections} currency={currency} />
+            <GoalBullets projections={goalProjections} currency={currency} />
             <TableToggle>
               <table className="data">
                 <thead>

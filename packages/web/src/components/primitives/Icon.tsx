@@ -28,6 +28,14 @@ const PATHS = {
   scenarios: ['m3 17 6-6 4 4 8-8', 'M21 7h-5', 'M21 7v5'],
   portfolio: ['M3 3v18h18', 'M7 15v3', 'M12 9v9', 'M17 5v13'],
   assistant: ['M20 15a2 2 0 0 1-2 2H8l-4 4V6a2 2 0 0 1 2-2h12a2 2 0 0 1 2 2Z'],
+  sparkle: [
+    'M12 3.2 13.9 8a3 3 0 0 0 1.7 1.7l4.8 1.9-4.8 1.9A3 3 0 0 0 13.9 15l-1.9 4.8-1.9-4.8a3 3 0 0 0-1.7-1.7L3.6 11.6l4.8-1.9A3 3 0 0 0 10.1 8Z',
+    'M18.5 3v3.4',
+    'M20.2 4.7h-3.4',
+  ],
+  expand: ['M14 4h6v6', 'M10 20H4v-6', 'm20 4-7.5 7.5', 'M4 20l7.5-7.5'],
+  search: ['M11 19a8 8 0 1 0 0-16 8 8 0 0 0 0 16Z', 'm21 21-4.3-4.3'],
+  send: ['m21 3-8 18-3-8-8-3Z', 'M21 3 10 13'],
   assumptions: ['m12 3 9 4.5-9 4.5-9-4.5L12 3Z', 'm3 16.5 9 4.5 9-4.5', 'm3 12 9 4.5 9-4.5'],
   profile: ['M12 13a4.5 4.5 0 1 0 0-9 4.5 4.5 0 0 0 0 9Z', 'M4 21a8 8 0 0 1 16 0'],
 } as const;
@@ -42,7 +50,7 @@ export function Icon({
 }: {
   name: IconName;
   /** 16 by default; 18 for navigation and the top bar. */
-  size?: 16 | 18 | 12 | 20;
+  size?: 12 | 16 | 18 | 20 | 22 | 24;
   /** An accessible name. Without one the icon is decorative and hidden. */
   label?: string;
   className?: string;

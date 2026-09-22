@@ -32,17 +32,23 @@ function Delta({
 }) {
   const changed = Math.abs(after - before) > 1e-9;
   const better = betterWhen === 'higher' ? after > before : after < before;
+  /*
+   * The outcome is the headline; where it came from is a footnote under it.
+   *
+   * Side by side, two currency figures and an arrow ran past the tile - the
+   * pair wrapped, a bare "Cr" landed on the next row beside a different
+   * number, and the taller tile knocked the whole cluster out of alignment.
+   * Stacking is what makes the width independent of how long the figures are,
+   * and it puts the size on the number the reader actually wants.
+   */
+  if (!changed) return <span className="num">{format(before)}</span>;
+
   return (
-    <span className="num">
-      {format(before)}
-      {changed && (
-        <>
-          {' → '}
-          <span className={better ? 'text-positive strong' : 'text-negative strong'}>
-            {format(after)}
-          </span>
-        </>
-      )}
+    <span className="delta-stack">
+      <span className={`num nowrap ${better ? 'text-positive' : 'text-negative'}`}>
+        {format(after)}
+      </span>
+      <span className="delta-from num nowrap">from {format(before)}</span>
     </span>
   );
 }

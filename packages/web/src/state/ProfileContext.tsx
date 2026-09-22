@@ -57,6 +57,7 @@ function readTheme(): 'dark' | 'light' {
   } catch {
     // Private browsing or blocked storage - fall through to the default.
   }
+  // Dark is the product; the light theme is the alternative, not the default.
   return 'dark';
 }
 

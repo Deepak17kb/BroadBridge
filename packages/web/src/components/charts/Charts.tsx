@@ -6,8 +6,12 @@ import {
   BarChart,
   CartesianGrid,
   Cell,
-  LabelList,
   Line,
+  PolarAngleAxis,
+  PolarGrid,
+  PolarRadiusAxis,
+  Radar,
+  RadarChart,
   ReferenceLine,
   ResponsiveContainer,
   Tooltip,
@@ -18,16 +22,15 @@ import {
   ASSET_CLASSES,
   ASSET_LABELS,
   formatCompact,
-  fundedPercent,
   type AllocationWeights,
   type AssetClass,
   type Currency,
-  type GoalProjection,
   type MonteCarloResult,
   type PortfolioAnalysis,
   type WellnessScore,
 } from '@wealth/shared';
 import { useMediaQuery } from '../../hooks/useMediaQuery';
+import { useChartEntrance } from '../../hooks/useChartEntrance';
 
 /**
  * The chart layer.
@@ -81,7 +84,7 @@ export const ASSET_COLOUR: Record<AssetClass, string> = {
 const AXIS = {
   fill: 'var(--text-subtle)',
   fontSize: 11,
-  fontFamily: 'var(--font-mono)',
+  fontFamily: 'var(--font-num)',
   width: 1000,
 } as const;
 
@@ -97,9 +100,11 @@ function useChartAxis() {
 }
 
 /**
- * Room for an axis of figures. The tick face is monospaced - every character
- * is 0.6em wide - so the widest label is measured from its length, and no
- * label wraps ("₹16.16" over "Cr") for want of a few pixels.
+ * Room for an axis of figures. Tick labels are set in tabular figures, so
+ * every digit takes the same width and the widest label can be measured from
+ * its length alone - no label wraps ("₹16.16" over "Cr") for want of a few
+ * pixels. 0.6em per character is an over-estimate for this face, which is the
+ * safe direction to be wrong in.
  */
 function axisWidth(labels: string[], fontSize: number): number {
   const longest = Math.max(1, ...labels.map((label) => label.length));
@@ -141,7 +146,7 @@ function LegendItem({
   children: ReactNode;
 }) {
   return (
-    <span className="legend-item">
+    <span className="legend-item" data-spot={colour}>
       <span className={line ? 'legend-line' : 'dot'} style={{ background: colour }} />
       {children}
     </span>
@@ -170,6 +175,7 @@ export function MonteCarloFan({
   height?: number;
 }) {
   const { narrow, tick } = useChartAxis();
+  const entrance = useChartEntrance();
   const data = useMemo(
     () =>
       result.bands.map((b) => ({
@@ -199,6 +205,28 @@ export function MonteCarloFan({
         <ResponsiveContainer width="100%" height="100%">
           {/* Right margin leaves room for the last year label, centred on the edge. */}
           <AreaChart data={data} margin={{ top: 6, right: 16, left: 4, bottom: 2 }}>
+            {/*
+             * The bands fade toward the far edge of the fan. Uncertainty widens
+             * with time, and a flat fill states every year with equal
+             * confidence; the gradient lets the later years read as looser.
+             */}
+            <defs>
+              {/*
+               * Held near opaque. These were 0.75 falling to 0.42, which on a
+               * near-black ground left the outer band barely separable from
+               * the card behind it - the fan read as a smudge. The far edge
+               * still fades, because uncertainty does widen with time, but it
+               * fades between two visible values rather than into the page.
+               */}
+              <linearGradient id="fan-outer" x1="0" y1="0" x2="1" y2="0">
+                <stop offset="0%" stopColor="var(--seq-100)" stopOpacity={1} />
+                <stop offset="100%" stopColor="var(--seq-100)" stopOpacity={0.82} />
+              </linearGradient>
+              <linearGradient id="fan-inner" x1="0" y1="0" x2="1" y2="0">
+                <stop offset="0%" stopColor="var(--seq-300)" stopOpacity={1} />
+                <stop offset="100%" stopColor="var(--seq-300)" stopOpacity={0.88} />
+              </linearGradient>
+            </defs>
             {/* Solid hairline grid - a dashed grid reads as a threshold line. */}
             <CartesianGrid stroke="var(--grid)" strokeDasharray="0" vertical={false} />
             <XAxis
@@ -251,7 +279,7 @@ export function MonteCarloFan({
               stroke="none"
               activeDot={false}
               fill="transparent"
-              isAnimationActive={false}
+              {...entrance}
             />
             <Area
               type="monotone"
@@ -259,9 +287,8 @@ export function MonteCarloFan({
               stackId="fan"
               stroke="none"
               activeDot={false}
-              fill="var(--seq-100)"
-              fillOpacity={0.55}
-              isAnimationActive={false}
+              fill="url(#fan-outer)"
+              {...entrance}
             />
             <Area
               type="monotone"
@@ -269,9 +296,8 @@ export function MonteCarloFan({
               stackId="fan"
               stroke="none"
               activeDot={false}
-              fill="var(--seq-300)"
-              fillOpacity={0.6}
-              isAnimationActive={false}
+              fill="url(#fan-inner)"
+              {...entrance}
             />
             <Area
               type="monotone"
@@ -279,18 +305,17 @@ export function MonteCarloFan({
               stackId="fan"
               stroke="none"
               activeDot={false}
-              fill="var(--seq-100)"
-              fillOpacity={0.55}
-              isAnimationActive={false}
+              fill="url(#fan-outer)"
+              {...entrance}
             />
             <Line
               type="monotone"
               dataKey="p50"
               stroke="var(--seq-700)"
-              strokeWidth={2}
+              strokeWidth={2.25}
               dot={false}
               activeDot={false}
-              isAnimationActive={false}
+              {...entrance}
             />
             {result.target > 0 && (
               <ReferenceLine
@@ -330,6 +355,7 @@ export function OutcomeHistogram({
   height?: number;
 }) {
   const { narrow, tick } = useChartAxis();
+  const entrance = useChartEntrance();
   const data = result.histogram.map((b) => ({
     label: formatCompact(b.bucketStart, currency),
     start: b.bucketStart,
@@ -339,6 +365,10 @@ export function OutcomeHistogram({
     // the status colour rather than another series hue.
     short: b.bucketEnd < result.target,
   }));
+
+  const shortCount = data.filter((d) => d.short).length;
+  // The first bucket that clears the target: where the line belongs.
+  const targetIndex = data.findIndex((d) => !d.short);
 
   return (
     <div>
@@ -372,7 +402,29 @@ export function OutcomeHistogram({
                 );
               }}
             />
-            <Bar dataKey="count" radius={[4, 4, 0, 0]} isAnimationActive={false}>
+            {/*
+             * The target, drawn on the axis rather than only implied by the
+             * bar colours. Without it a chart of all-teal bars reads as a bug
+             * - "why is nothing red?" - when it is in fact the plan clearing
+             * the target on every path. The line is placed on the first
+             * bucket that meets it, because this axis is categorical.
+             */}
+            {targetIndex >= 0 && (
+              <ReferenceLine
+                x={data[targetIndex]?.label}
+                stroke="var(--warning)"
+                strokeWidth={1.5}
+                strokeDasharray="4 3"
+                label={{
+                  value: 'Target',
+                  position: 'insideTopRight',
+                  fill: 'var(--warning)',
+                  fontSize: 10,
+                  fontWeight: 700,
+                }}
+              />
+            )}
+            <Bar dataKey="count" radius={[4, 4, 0, 0]} {...entrance}>
               {data.map((d, i) => (
                 <Cell key={i} fill={d.short ? 'var(--negative)' : 'var(--seq-500)'} fillOpacity={0.85} />
               ))}
@@ -382,8 +434,18 @@ export function OutcomeHistogram({
       </div>
       <div className="legend mt-2">
         <LegendItem colour="var(--seq-500)">Meets the target</LegendItem>
-        <LegendItem colour="var(--negative)">Falls short</LegendItem>
+        {/* Only claimed when a bar actually carries it. */}
+        {shortCount > 0 && <LegendItem colour="var(--negative)">Falls short</LegendItem>}
+        <LegendItem colour="var(--warning)" line>
+          Target {formatCompact(result.target, currency)}
+        </LegendItem>
       </div>
+      {shortCount === 0 && result.target > 0 && (
+        <p className="text-xs text-subtle mt-2">
+          No bar falls short: on these assumptions every simulated path clears the target, so the
+          spread is about how much you end up with rather than whether you get there.
+        </p>
+      )}
     </div>
   );
 }
@@ -414,22 +476,32 @@ export function AllocationBar({
 }) {
   const [hovered, setHovered] = useState<AssetClass | null>(null);
   const present = ASSET_CLASSES.filter((ac) => (weights[ac] ?? 0) > 0.001);
+  /*
+   * Without a label the bar is inline in a table cell rather than heading its
+   * own block. It then gets no header row at all - an empty one still
+   * reserved a line of text above every bar, which is what pushed the mix
+   * column out of line with the rest of its row - and its segments have to be
+   * wider before a percentage will fit inside them.
+   */
+  const inline = label === '';
+  const labelFloor = inline ? 13 : 7;
+
+  const readout = (ac: AssetClass) =>
+    `${ASSET_LABELS[ac]} · ${((weights[ac] ?? 0) * 100).toFixed(1)}%` +
+    (total && currency ? ` · ${formatCompact((weights[ac] ?? 0) * total, currency)}` : '');
 
   return (
     <div>
-      <div className="row-between mb-2">
-        <span className="text-sm strong">{label}</span>
-        {hovered && (
-          <span className="text-xs text-muted">
-            {ASSET_LABELS[hovered]} · {((weights[hovered] ?? 0) * 100).toFixed(1)}%
-            {total && currency ? ` · ${formatCompact((weights[hovered] ?? 0) * total, currency)}` : ''}
-          </span>
-        )}
-      </div>
+      {!inline && (
+        <div className="row-between mb-2">
+          <span className="text-sm strong">{label}</span>
+          {hovered && <span className="text-xs text-muted">{readout(hovered)}</span>}
+        </div>
+      )}
       <div
-        className="composition"
+        className={`composition${inline ? ' composition-inline' : ''}`}
         role="img"
-        aria-label={`${label}: ${present.map((ac) => `${ASSET_LABELS[ac]} ${((weights[ac] ?? 0) * 100).toFixed(0)}%`).join(', ')}`}
+        aria-label={`${label ? `${label}: ` : ''}${present.map((ac) => `${ASSET_LABELS[ac]} ${((weights[ac] ?? 0) * 100).toFixed(0)}%`).join(', ')}`}
       >
         {present.map((ac) => {
           const pct = (weights[ac] ?? 0) * 100;
@@ -438,11 +510,14 @@ export function AllocationBar({
               key={ac}
               className="composition-segment"
               style={{ flex: `0 0 calc(${pct}% - 2px)`, background: ASSET_COLOUR[ac] }}
+              /* The inline bar has nowhere to put a readout, so every segment
+                 carries its own - including the slivers too narrow to label. */
+              title={readout(ac)}
+              data-spot={ASSET_COLOUR[ac]}
               onMouseEnter={() => setHovered(ac)}
               onMouseLeave={() => setHovered(null)}
             >
-              {/* ~7% is the narrowest segment that fits "12%" with padding. */}
-              {pct >= 7 && <span className="composition-label">{pct.toFixed(0)}%</span>}
+              {pct >= labelFloor && <span className="composition-label">{pct.toFixed(0)}%</span>}
             </div>
           );
         })}
@@ -500,6 +575,7 @@ export function DriftChart({
               <span
                 className={`drift-bar ${over ? 'over' : 'under'}`}
                 style={{ width: `${width}%`, left: over ? '50%' : `calc(50% - ${width}%)` }}
+                data-spot={over ? 'var(--warning)' : 'var(--info)'}
               />
             </div>
             <span className={`text-xs num text-right ${over ? 'text-warning' : ''}`.trim()}>
@@ -538,118 +614,6 @@ export function fundedAxis(dataMax: number): { top: number; ticks: number[] } {
 }
 
 /**
- * How much of each goal the plan is projected to fund, as a percentage.
- *
- * One scale for every goal. Plotted in rupees, a 20 Cr retirement target
- * flattened a 3 L trip into an invisible sliver - hiding exactly the nearest
- * goals. The rupee figures are still one hover away, in the tooltip, and the
- * axis stretches past 100% in 25% steps when a goal is over-funded.
- */
-export function GoalFundingChart({
-  projections,
-  currency,
-  height = 250,
-}: {
-  projections: GoalProjection[];
-  currency: Currency;
-  height?: number;
-}) {
-  const { narrow, tick } = useChartAxis();
-  // Every bar keeps its name, so on a phone the names are cut shorter instead.
-  const nameLimit = narrow ? 10 : 17;
-  const data = projections.map((p) => ({
-    name: p.goalName.length > nameLimit ? `${p.goalName.slice(0, nameLimit - 1)}…` : p.goalName,
-    fullName: p.goalName,
-    fundedPct: fundedPercent(p),
-    projected: p.projectedCorpus,
-    target: p.inflatedTarget,
-    onTrack: p.onTrack,
-    years: p.yearsToGoal,
-  }));
-  const { top, ticks } = fundedAxis(Math.max(0, ...data.map((d) => d.fundedPct)));
-
-  return (
-    <div>
-      <div className="chart-frame" style={{ height }}>
-        <ResponsiveContainer width="100%" height="100%">
-          {/* Top margin leaves room for the value label over a bar that reaches the top. */}
-          <BarChart data={data} margin={{ top: 20, right: 12, left: 4, bottom: 4 }}>
-            <CartesianGrid stroke="var(--grid)" strokeDasharray="0" vertical={false} />
-            <XAxis
-              dataKey="name"
-              tick={{ ...tick, fontFamily: 'var(--font)' }}
-              tickLine={false}
-              axisLine={{ stroke: 'var(--grid)' }}
-              interval={0}
-            />
-            <YAxis
-              tick={tick}
-              tickLine={false}
-              axisLine={false}
-              width={axisWidth(ticks.map((t) => `${t}%`), tick.fontSize)}
-              domain={[0, top]}
-              ticks={ticks}
-              interval={0}
-              tickFormatter={(v: number) => `${v}%`}
-            />
-            <Tooltip
-              {...TOOLTIP}
-              content={({ active, payload }) => {
-                if (!active || !payload?.length) return null;
-                const d = payload[0]?.payload as (typeof data)[number] | undefined;
-                if (!d) return null;
-                return (
-                  <ChartTooltip
-                    label={d.fullName}
-                    rows={[
-                      { name: 'Needed at goal date', value: formatCompact(d.target, currency), colour: 'var(--text-subtle)' },
-                      { name: 'Projected', value: formatCompact(d.projected, currency), colour: d.onTrack ? 'var(--positive)' : 'var(--negative)' },
-                      { name: 'Funded', value: `${Math.round(d.fundedPct)}%` },
-                      { name: 'Years away', value: d.years.toFixed(1) },
-                    ]}
-                  />
-                );
-              }}
-            />
-            <ReferenceLine
-              y={100}
-              stroke="var(--border-strong)"
-              strokeDasharray="4 4"
-              label={{
-                value: '100% funded',
-                position: 'insideTopRight',
-                fill: 'var(--text-subtle)',
-                fontSize: 10,
-              }}
-            />
-            {/* One bar per goal in the status colour. Its width is capped near
-                what each of the old pair of bars was, so the chart keeps its weight. */}
-            <Bar dataKey="fundedPct" radius={[4, 4, 0, 0]} maxBarSize={100} isAnimationActive={false} name="Funded">
-              {data.map((d, i) => (
-                <Cell key={i} fill={d.onTrack ? 'var(--positive)' : 'var(--negative)'} />
-              ))}
-              {/* A value on every bar, so a 2% goal is as readable as a 69% one. */}
-              <LabelList
-                dataKey="fundedPct"
-                position="top"
-                formatter={(v: number) => `${Math.round(v)}%`}
-                fill="var(--text)"
-                fontSize={tick.fontSize}
-                fontFamily="var(--font-mono)"
-              />
-            </Bar>
-          </BarChart>
-        </ResponsiveContainer>
-      </div>
-      <div className="legend mt-2">
-        <LegendItem colour="var(--positive)">Projected - on track</LegendItem>
-        <LegendItem colour="var(--negative)">Projected - short</LegendItem>
-      </div>
-    </div>
-  );
-}
-
-/**
  * Wellness pillars as meters.
  *
  * Each pillar is one ratio against a fixed limit, which the form heuristic
@@ -682,6 +646,7 @@ export function PillarMeters({ wellness }: { wellness: WellnessScore }) {
             </div>
             <div
               className="bar"
+              data-spot={p.scored ? `var(--${tone})` : undefined}
               role="meter"
               aria-valuenow={p.scored ? p.score : 0}
               aria-valuemin={0}
@@ -699,6 +664,84 @@ export function PillarMeters({ wellness }: { wellness: WellnessScore }) {
           </div>
         );
       })}
+    </div>
+  );
+}
+
+/**
+ * The five pillars as a radar.
+ *
+ * The meters below it answer "how is Debt doing"; this answers "what shape is
+ * this plan" - whether the weakness is one spike or a flat, evenly thin
+ * profile, which is the thing a reader cannot assemble from five separate
+ * bars. The two forms carry the same numbers on purpose: the radar is read at
+ * a glance and the meters are read for the value.
+ *
+ * It is drawn only when every pillar is scored. A radar with a missing axis
+ * collapsed to zero draws a shape that says "bad here" when the truth is
+ * "not measured", and that is a worse lie than showing nothing.
+ */
+export function WellnessRadar({
+  wellness,
+  height = 250,
+}: {
+  wellness: WellnessScore;
+  height?: number;
+}) {
+  const entrance = useChartEntrance(1100);
+  if (!wellness.dataComplete) return null;
+
+  const data = wellness.pillars.map((p) => ({
+    pillar: p.name,
+    score: p.score,
+    weight: p.weight,
+    summary: p.summary,
+  }));
+
+  return (
+    <div className="chart-frame" style={{ height }}>
+      <ResponsiveContainer width="100%" height="100%">
+        <RadarChart data={data} outerRadius="80%" margin={{ top: 4, right: 4, bottom: 4, left: 4 }}>
+          <defs>
+            <radialGradient id="radar-fill" cx="50%" cy="50%" r="50%">
+              <stop offset="0%" stopColor="var(--accent-strong)" stopOpacity={0.42} />
+              <stop offset="100%" stopColor="var(--accent)" stopOpacity={0.16} />
+            </radialGradient>
+          </defs>
+          <PolarGrid stroke="var(--grid)" />
+          <PolarAngleAxis
+            dataKey="pillar"
+            tick={{ fill: 'var(--text-muted)', fontSize: 11, fontFamily: 'var(--font)' }}
+          />
+          {/* The rings are the scale; numbering them as well just adds ink. */}
+          <PolarRadiusAxis domain={[0, 100]} tick={false} axisLine={false} />
+          <Tooltip
+            {...TOOLTIP}
+            content={({ active, payload }) => {
+              if (!active || !payload?.length) return null;
+              const d = payload[0]?.payload as (typeof data)[number] | undefined;
+              if (!d) return null;
+              return (
+                <ChartTooltip
+                  label={d.pillar}
+                  rows={[
+                    { name: 'Score', value: `${d.score}/100`, colour: 'var(--accent)' },
+                    { name: 'Weight in total', value: `${(d.weight * 100).toFixed(0)}%` },
+                  ]}
+                />
+              );
+            }}
+          />
+          <Radar
+            dataKey="score"
+            stroke="var(--accent)"
+            strokeWidth={2}
+            fill="url(#radar-fill)"
+            dot={{ r: 3, fill: 'var(--accent)', stroke: 'none' }}
+            {...entrance}
+          />
+        </RadarChart>
+      </ResponsiveContainer>
     </div>
   );
 }
@@ -721,7 +764,7 @@ export function ExpenseBars({
           </span>
           {/* One hue: this is magnitude, not identity. The largest category
               is emphasised so the eye lands on what matters. */}
-          <span className="bar expense-track">
+          <span className="bar expense-track" data-spot={`var(--${i === 0 ? 'series-1' : 'seq-300'})`}>
             <span
               className={`bar-fill ${i === 0 ? 'lead' : 'rest'}`}
               style={{ width: `${(b.amount / max) * 100}%` }}
@@ -752,6 +795,7 @@ export function ScenarioComparison({
   height?: number;
 }) {
   const { narrow, tick } = useChartAxis();
+  const entrance = useChartEntrance();
   const nameLimit = narrow ? 16 : 26;
   const data = rows.map((r) => ({
     ...r,
@@ -819,7 +863,7 @@ export function ScenarioComparison({
                 fontWeight: 700,
               }}
             />
-            <Bar dataKey="value" radius={[0, 4, 4, 0]} isAnimationActive={false} barSize={18}>
+            <Bar dataKey="value" radius={[0, 4, 4, 0]} barSize={18} {...entrance}>
               {data.map((d, i) => (
                 <Cell key={i} fill={d.delta >= 0 ? 'var(--positive)' : 'var(--negative)'} />
               ))}

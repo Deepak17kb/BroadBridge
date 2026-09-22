@@ -10,8 +10,10 @@ import {
 } from '@wealth/shared';
 import { api } from '../lib/api';
 import { useLoadedProfile } from '../state/ProfileContext';
-import { AnimatedNumber, AssumptionList, Badge, Callout, Card, Slider, Stat } from '../components/ui';
+import { AnimatedNumber, AssumptionList, Badge, Callout, Card, Icon, Slider, Stat } from '../components/ui';
 import { RiskLadder, useRiskLadder, type LadderRow } from '../components/RiskLadder';
+import { ScenarioFacts } from '../components/ScenarioFacts';
+import { OutcomeOdds } from '../components/OutcomeOdds';
 import { MonteCarloFan, OutcomeHistogram, ScenarioComparison, TableToggle } from '../components/charts/Charts';
 
 /**
@@ -29,6 +31,27 @@ import { MonteCarloFan, OutcomeHistogram, ScenarioComparison, TableToggle } from
  */
 
 const EMPTY: ScenarioLevers = {};
+
+/**
+ * A round step that divides a range into roughly `stops` positions.
+ *
+ * The steps here used to be written as `Math.round(income / 10) * 1000`, which
+ * reads like "a tenth of income, to the nearest thousand" but is not: it
+ * multiplies *after* dividing. On a ₹2.28L income that produced a step of
+ * ₹2.28 crore on a slider whose maximum was ₹54.7 lakh - a control with a
+ * single reachable position, which is why the lump-sum lever could not be
+ * moved off zero and nothing could be pinned from it.
+ *
+ * This picks the nearest 1 / 2 / 5 × 10ⁿ instead, so every range lands on a
+ * human-readable increment with a usable number of stops.
+ */
+function niceStep(max: number, stops = 150): number {
+  const raw = Math.max(1, max / stops);
+  const magnitude = 10 ** Math.floor(Math.log10(raw));
+  const normalised = raw / magnitude;
+  const rounded = normalised <= 1 ? 1 : normalised <= 2 ? 2 : normalised <= 5 ? 5 : 10;
+  return rounded * magnitude;
+}
 
 /** The comparison endpoint caps at six, so the pin control does too. */
 const MAX_PINNED = 6;
@@ -68,31 +91,39 @@ export function Scenarios() {
   const [pinnedLocally, setPinnedLocally] = useState(false);
   const timer = useRef<number | undefined>(undefined);
 
-  // The interactive value updates instantly; the expensive simulation waits for
-  // the drag to settle.
+  // The full-precision run waits for the drag to settle; the charts do not -
+  // see `result` below.
   useEffect(() => {
     setDragging(true);
     window.clearTimeout(timer.current);
     timer.current = window.setTimeout(() => {
       setSettled(levers);
       setDragging(false);
-    }, 180);
+    }, 140);
     return () => window.clearTimeout(timer.current);
   }, [levers]);
 
   useEffect(() => () => window.clearTimeout(timer.current), []);
 
+  /*
+   * Mid-drag this follows the *live* lever, not the settled one.
+   *
+   * It used to read `settled`, which only updates once the drag stops - so
+   * every chart sat perfectly still while the slider moved and then jumped
+   * when you let go. Reading `levers` is what makes the fan and the figures
+   * track the thumb. The path count is what keeps that affordable: a coarse
+   * simulation every frame, then the full 2,500 once the value settles, so
+   * the shape is live and the number you are left looking at is exact.
+   */
   const result = useMemo<ScenarioResult>(
     () =>
       runScenario({
         profile,
-        levers: settled,
+        levers: dragging ? levers : settled,
         baseline: snapshot,
-        // Fewer paths mid-drag keeps the fan chart responsive; the settled run
-        // uses the full count.
-        paths: dragging ? 600 : 2500,
+        paths: dragging ? 250 : 2500,
       }),
-    [profile, settled, snapshot, dragging],
+    [profile, levers, settled, snapshot, dragging],
   );
 
   /*
@@ -210,6 +241,7 @@ export function Scenarios() {
       </Card>
 
       <div className="grid grid-sidebar-left">
+        <div className="stack">
         <Card title="Levers" subtitle="Anything left untouched stays as it is today">
           <div className="stack">
             <Slider
@@ -217,7 +249,8 @@ export function Scenarios() {
               value={levers.extraMonthlySavings ?? 0}
               min={0}
               max={Math.round(income * 0.6)}
-              step={Math.max(500, Math.round(income / 200) * 100)}
+              step={niceStep(Math.round(income * 0.6))}
+              editable
               onChange={(v) => set('extraMonthlySavings', v || undefined)}
               format={(v) => (v ? `+${formatCompact(v, currency)}` : 'No change')}
               hint={
@@ -260,7 +293,8 @@ export function Scenarios() {
               value={levers.lumpSum ?? 0}
               min={0}
               max={Math.round(income * 24)}
-              step={Math.max(10000, Math.round(income / 10) * 1000)}
+              step={niceStep(Math.round(income * 24))}
+              editable
               onChange={(v) => set('lumpSum', v || undefined)}
               format={(v) => (v ? formatCompact(v, currency) : 'None')}
               hint="A bonus, maturity or sale proceeds"
@@ -392,7 +426,22 @@ export function Scenarios() {
               )}
             </div>
           </div>
-        </Card>
+          </Card>
+
+          {/*
+            * The levers column ended at the pin button, leaving most of its
+            * height empty beside a much taller results column. These are the
+            * same compounding facts the levers are built on, priced in this
+            * profile's own horizon and return.
+            */}
+          <ScenarioFacts
+            years={snapshot.retirement.yearsToRetirement}
+            annualReturn={snapshot.portfolio.expectedReturnPct}
+            inflation={snapshot.assumptions.inflationPct}
+            surplus={snapshot.cashflow.monthlySurplus}
+            currency={currency}
+          />
+        </div>
 
         <div className="stack">
           {/* Outcome headline. The deltas are the point - two large absolute
@@ -500,6 +549,10 @@ export function Scenarios() {
           <div className="grid grid-2">
             <Card title="Where the simulations landed" subtitle="Each bar is a band of final outcomes">
               <OutcomeHistogram result={result.monteCarlo} currency={currency} />
+              <hr className="divider" />
+              {/* The chart shows the shape; this says what the shape is worth,
+                  off the same run, in the space the chart left empty. */}
+              <OutcomeOdds result={result.monteCarlo} currency={currency} />
             </Card>
 
             <Card
@@ -510,11 +563,47 @@ export function Scenarios() {
                   : `Pin up to ${MAX_PINNED} scenarios to compare alternatives side by side`
               }
             >
-              <ScenarioComparison
-                rows={comparison}
-                baseline={snapshot.retirement.projectedCorpus}
-                currency={currency}
-              />
+              {/*
+                * With nothing pinned the chart is one bar and a lot of empty
+                * panel, and the feature needs a lever moved before its button
+                * even enables - so the empty state pins for you instead of
+                * describing what pinning is.
+                */}
+              {saved.length === 0 ? (
+                <div className="quick-compare">
+                  <p className="text-sm text-muted m-0">
+                    Pin a few alternatives and they are all re-scored against one baseline, so the
+                    bars can be read against each other rather than each against its own starting
+                    point. Start from any of these:
+                  </p>
+                  <div className="quick-compare-grid">
+                    {SCENARIO_PRESETS.slice(0, MAX_PINNED).map((preset) => (
+                      <button
+                        key={preset.id}
+                        className="quick-compare-item"
+                        title={preset.description}
+                        onClick={() => {
+                          setLevers(preset.levers);
+                          setSaved((s) =>
+                            s.length >= MAX_PINNED
+                              ? s
+                              : [...s, { label: preset.label, levers: preset.levers }],
+                          );
+                        }}
+                      >
+                        <Icon name="plus" size={16} />
+                        <span className="truncate">{preset.label}</span>
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              ) : (
+                <ScenarioComparison
+                  rows={comparison}
+                  baseline={snapshot.retirement.projectedCorpus}
+                  currency={currency}
+                />
+              )}
               {pinnedLocally && (
                 <p className="text-xs text-subtle">
                   Scored in your browser — the server comparison was unreachable. Same engine, same

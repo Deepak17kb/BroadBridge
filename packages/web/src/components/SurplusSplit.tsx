@@ -77,6 +77,7 @@ export function SurplusSplit({
                       background: `var(--series-${(i % 6) + 1})`,
                     }}
                     title={`${a.goalName}: ${money(a.allocated)}`}
+                    data-spot={`var(--series-${(i % 6) + 1})`}
                   />
                 ))}
               {result.unallocated > 0 && (
