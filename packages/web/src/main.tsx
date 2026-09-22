@@ -13,7 +13,10 @@ initSpotlight();
 
 createRoot(container).render(
   <StrictMode>
-    <BrowserRouter>
+    {/* On GitHub Pages the app is served from /<repo>/, so the router has to
+        strip that prefix before matching. Vite fills BASE_URL in from the
+        build's `base`, which is '/' everywhere else. */}
+    <BrowserRouter basename={import.meta.env.BASE_URL}>
       <ProfileProvider>
         <App />
       </ProfileProvider>

@@ -9,13 +9,19 @@ import type {
   ScenarioResult,
   UserProfile,
 } from '@wealth/shared';
+import { ApiError } from './apiError';
+import { staticApi, staticStreamAgent } from './staticApi';
 
 /**
  * Typed API client.
  *
  * In development everything goes through Vite's proxy on the same origin, so
  * there is no base URL and no CORS. In production `VITE_API_URL` points at the
- * API Gateway stage.
+ * deployed API.
+ *
+ * On a static host there is no API at all. `VITE_STATIC` swaps in
+ * `staticApi`, which answers the same calls in the browser from the same
+ * finance engine - see `staticApi.ts` for why that is exact rather than a mock.
  */
 
 /**
@@ -23,18 +29,11 @@ import type {
  * read defensively: the smoke-render tests import this file under plain Node,
  * where the whole object is undefined.
  */
-const BASE = (import.meta as { env?: Record<string, string | undefined> }).env?.VITE_API_URL ?? '';
+const ENV = (import.meta as { env?: Record<string, string | undefined> }).env;
+const BASE = ENV?.VITE_API_URL ?? '';
+const STATIC = ENV?.VITE_STATIC === 'true';
 
-export class ApiError extends Error {
-  constructor(
-    readonly status: number,
-    message: string,
-    readonly details?: unknown,
-  ) {
-    super(message);
-    this.name = 'ApiError';
-  }
-}
+export { ApiError };
 
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
   const res = await fetch(`${BASE}/api${path}`, {
@@ -92,7 +91,7 @@ export interface AgentCapabilities {
   knowledgeBase: { id: string; title: string; tags: string[] }[];
 }
 
-export const api = {
+const networkApi = {
   health: () => request<HealthInfo>('/health'),
   capabilities: () => request<AgentCapabilities>('/agent/capabilities'),
   personas: () => request<PersonaSummary[]>('/profiles/personas'),
@@ -188,6 +187,12 @@ export const api = {
 };
 
 /**
+ * The client the app talks to. Which one is decided at build time, so the
+ * unused implementation is tree-shaken out rather than shipped dormant.
+ */
+export const api = (STATIC ? staticApi : networkApi) as typeof networkApi;
+
+/**
  * Opens the agent's SSE stream.
  *
  * `EventSource` is used rather than a fetch-based reader because it reconnects
@@ -204,6 +209,8 @@ export function streamAgent(
     onError: (error: string) => void;
   },
 ): () => void {
+  if (STATIC) return staticStreamAgent(profileId, message, sessionId, handlers);
+
   const params = new URLSearchParams({ message });
   if (sessionId) params.set('sessionId', sessionId);
   const source = new EventSource(`${BASE}/api/agent/${profileId}/stream?${params.toString()}`);

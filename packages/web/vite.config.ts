@@ -8,7 +8,16 @@ import { fileURLToPath } from 'node:url';
  * pass that compiles the app - so a change to the maths is live in the browser
  * on the next HMR tick, with no build step between the two packages.
  */
+/**
+ * GitHub Pages serves a project site from `/<repo>/`, not from the domain root,
+ * so every asset URL needs that prefix. It is passed in by the Pages workflow
+ * rather than hardcoded, so a fork under a different name builds correctly and
+ * every other build (dev, a server deployment) keeps serving from `/`.
+ */
+const base = process.env.VITE_BASE ?? '/';
+
 export default defineConfig({
+  base,
   plugins: [react()],
   resolve: {
     alias: {

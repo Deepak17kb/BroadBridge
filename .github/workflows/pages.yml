@@ -1,0 +1,64 @@
+name: Pages
+
+# Publishes the web app to GitHub Pages.
+#
+# Pages serves files, not processes, so the build sets VITE_STATIC and the
+# client answers its own calls in the browser from the shared finance engine
+# (see packages/web/src/lib/staticApi.ts). Nothing here needs a secret.
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+# One publish at a time, and let a newer commit cancel an in-flight build -
+# the site only ever reflects the tip of main, so an older build finishing
+# after a newer one would put the wrong thing live.
+concurrency:
+  group: pages
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+
+      - run: npm ci
+
+      - name: Build the static site
+        run: npm run build --workspace @wealth/web
+        env:
+          VITE_STATIC: 'true'
+          # A project site lives under /<repo>/. Deriving it from the repository
+          # name keeps a fork working without editing this file.
+          VITE_BASE: /${{ github.event.repository.name }}/
+
+      - name: Add the SPA fallback
+        # Pages has no rewrite rules, so a deep link like /goals is a 404 on a
+        # hard refresh. Pages serves 404.html for any miss, and since it is a
+        # copy of index.html the app boots and the router resolves the path.
+        run: cp packages/web/dist/index.html packages/web/dist/404.html
+
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: packages/web/dist
+
+  deploy:
+    needs: build
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - id: deployment
+        uses: actions/deploy-pages@v4
