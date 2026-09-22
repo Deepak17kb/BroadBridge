@@ -10,7 +10,6 @@ import {
   type VerificationCheck,
 } from '@wealth/shared';
 import { api, IS_STATIC, streamAgent, type AgentCapabilities } from '../lib/api';
-import { ModelKeyPanel } from '../components/ModelKeyPanel';
 import { useLoadedProfile, useProfile } from '../state/ProfileContext';
 import { AssumptionList, Badge, Callout, Card, Icon } from '../components/ui';
 import { MonteCarloFan, TableToggle } from '../components/charts/Charts';
@@ -90,16 +89,9 @@ export function Assistant() {
   /** Set when this turn ran `update_plan`, so the edited plan is fetched once it is saved. */
   const planChangedRef = useRef(false);
 
-  /*
-   * Re-read rather than computed once: on the static build the visitor can
-   * connect or disconnect their own model key at any time, and the engine
-   * badge and tool count must follow what is actually configured now.
-   */
-  const reloadCapabilities = useCallback(() => {
+  useEffect(() => {
     api.capabilities().then(setCapabilities).catch(() => setCapabilities(null));
   }, []);
-
-  useEffect(reloadCapabilities, [reloadCapabilities]);
 
   const refreshSessions = useCallback(() => {
     api
@@ -341,7 +333,14 @@ export function Assistant() {
       </header>
 
       {IS_STATIC ? (
-        <ModelKeyPanel onChange={reloadCapabilities} />
+        <Callout tone="info">
+          This build has no API server, so the agent is running <b>in your browser</b> — the same
+          orchestrator, the same tools, the same grounding check on every figure. What it cannot do
+          here is call a language model, because a model needs a key and a key in a public bundle is
+          readable by anyone. So it plans and answers with its rule-based engine: the arithmetic is
+          identical, the wording is less fluent than a model's. Run it locally with{' '}
+          <code>ANTHROPIC_API_KEY</code> or <code>GROQ_API_KEY</code> set for the prose.
+        </Callout>
       ) : (
         capabilities?.engine === 'deterministic' && (
           <Callout tone="info">
