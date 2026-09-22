@@ -24,7 +24,7 @@ No install, no sign-up. Pick a sample profile and the whole platform lights up �
 
 It covers the dashboard and what the advice is worth, the wellness pillars and their arithmetic, goal funding, a −30% market crash applied live in the Scenario Lab, the ranked actions, and the agent answering a question with its reasoning trace and a grounding check on every figure.
 
-The presenter's script — the words to say, the timings, and the questions to expect — is in **[docs/DEMO_SCRIPT_5MIN.md](docs/DEMO_SCRIPT_5MIN.md)**.
+The presenter's script — the words to say, the timings, and the questions to expect — is in **[docs/DEMO_SCRIPT_5MIN.md](docs/DEMO_SCRIPT_5MIN.md)**, and the full component-by-component deck (45 slides, with speaker notes on every one) is **[docs/BroadBridge-Walkthrough.pptx](docs/BroadBridge-Walkthrough.pptx)**.
 
 ---
 
