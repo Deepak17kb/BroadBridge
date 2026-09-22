@@ -110,10 +110,14 @@ export async function runAgent(opts: RunAgentOptions): Promise<AgentMessage> {
 
   try {
     if (llm) {
-      const answer = await runWithModel({ ...opts, ctx, plan, runs, citations, attachments, llm, intent });
+      const answer = await runWithModel({
+        ...opts, ctx, plan, runs, citations, attachments, llm, intent, confidence,
+      });
       return answer;
     }
-    const answer = await runDeterministic({ ...opts, ctx, plan, runs, citations, attachments, intent });
+    const answer = await runDeterministic({
+      ...opts, ctx, plan, runs, citations, attachments, intent, confidence,
+    });
     return answer;
   } catch (error) {
     const described = describeLlmError(error);
@@ -136,6 +140,7 @@ export async function runAgent(opts: RunAgentOptions): Promise<AgentMessage> {
         citations,
         attachments,
         intent,
+        confidence,
         degraded: true,
       });
       return answer;
@@ -199,6 +204,8 @@ interface PhaseArgs extends RunAgentOptions {
   citations: Citation[];
   attachments: AgentAttachment[];
   intent: Intent;
+  /** How sure the router was. Low confidence widens the tools on offer. */
+  confidence: number;
 }
 
 /** Runs one tool, narrates it, and records everything needed for verification. */
@@ -348,12 +355,27 @@ const ALWAYS_OFFERED = ['get_financial_snapshot', 'search_knowledge'] as const;
  *
  * The model can still decline the plan; it simply chooses from a shortlist the
  * router picked for this intent rather than from everything the platform owns.
+ *
+ * Unless the router was guessing. The classifier is a keyword matcher, so an
+ * unphrased question - "if I move to Dubai and my salary doubles, what
+ * changes?" - matches nothing and lands on a fallback intent at confidence
+ * 0.3. Narrowing to *that* plan handed the model four tools chosen for a
+ * question the user did not ask, and the answer came back as a generic list of
+ * recommendations: the system prompt invites the model to deviate, and the
+ * tool scope made deviating impossible.
+ *
+ * So below the threshold the whole catalogue goes on offer and the model picks
+ * for itself. It costs prompt tokens on exactly the runs where the shortlist
+ * was unreliable, which is the right trade: a cheap wrong answer is not cheap.
  */
+const CONFIDENT_ENOUGH_TO_NARROW = 0.5;
+
 export function offeredTools(
   plan: AgentPlanStep[],
   scope: AppConfig['agentToolScope'] = config.agentToolScope,
+  confidence = 1,
 ): Anthropic.Tool[] {
-  if (scope === 'all') return toolSchemas();
+  if (scope === 'all' || confidence < CONFIDENT_ENOUGH_TO_NARROW) return toolSchemas();
   return toolSchemas([...new Set([...ALWAYS_OFFERED, ...plan.map((step) => step.tool)])]);
 }
 
@@ -361,7 +383,7 @@ async function runWithModel(
   args: PhaseArgs & { llm: NonNullable<Awaited<ReturnType<typeof getLlm>>> },
 ): Promise<AgentMessage> {
   const { llm } = args;
-  const tools = offeredTools(args.plan);
+  const tools = offeredTools(args.plan, config.agentToolScope, args.confidence);
 
   // The user's position is injected up front. It costs a few hundred tokens and
   // removes an entire round-trip for the common case where the model would
@@ -371,7 +393,12 @@ async function runWithModel(
     `User: ${args.ctx.profile.displayName}, age ${args.ctx.profile.age}, retiring at ${args.ctx.profile.retirementAge}, ${args.ctx.profile.dependents} dependent(s), currency ${args.ctx.profile.currency}.`,
     `Position: net worth ${formatCompact(snapshot.netWorth.netWorth, args.ctx.profile.currency)}, monthly surplus ${formatCompact(snapshot.cashflow.monthlySurplus, args.ctx.profile.currency)}, emergency cover ${snapshot.cashflow.emergencyFundMonths} months, risk profile ${snapshot.risk.bucket}, wellness ${snapshot.wellness.total}/100.`,
     `Goals: ${snapshot.goalProjections.map((g) => `${g.goalName} (${(g.fundedRatio * 100).toFixed(0)}% funded, ${g.yearsToGoal.toFixed(1)}y away)`).join('; ') || 'none set'}.`,
-    `Planner's intent classification: ${args.intent}. Suggested toolchain: ${args.plan.filter((s) => s.tool !== 'synthesize').map((s) => s.tool).join(' -> ')}. You may deviate if the question warrants it.`,
+    // An unreliable classification is worse than none: told "intent: actions"
+    // with no caveat, the model answered a question about moving abroad with a
+    // ranked list of recommendations. When the router guessed, say so.
+    args.confidence < CONFIDENT_ENOUGH_TO_NARROW
+      ? `The planner could not classify this question (best guess: ${args.intent}, low confidence), so no toolchain is suggested and the full catalogue is available. Read the question yourself and choose the tools that actually answer it.`
+      : `Planner's intent classification: ${args.intent}. Suggested toolchain: ${args.plan.filter((s) => s.tool !== 'synthesize').map((s) => s.tool).join(' -> ')}. You may deviate if the question warrants it.`,
     `Today is ${new Date().toISOString().slice(0, 10)}.`,
   ].join('\n');
 

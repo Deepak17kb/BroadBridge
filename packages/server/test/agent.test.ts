@@ -340,6 +340,35 @@ test('the offered set covers the plan, keeps the escape hatches, and stays small
   }
 });
 
+/**
+ * The router is a keyword matcher, so an unphrased question - "if I move to
+ * Dubai and my salary doubles, what changes?" - matches nothing and lands on a
+ * fallback intent at confidence 0.3. Narrowing to that plan handed the model
+ * four tools picked for a question the user had not asked, and the answer came
+ * back as a generic list of recommendations.
+ *
+ * Below the threshold the model gets everything and chooses for itself. Above
+ * it, narrowing still pays for the per-minute allowance it was added for.
+ */
+test('a guessed intent offers the whole catalogue, a confident one still narrows', () => {
+  const full = toolSchemas().length;
+  const plan = heuristicPlan('actions');
+
+  assert.equal(offeredTools(plan, 'plan', 0.3).length, full, 'a guess must not be narrowed to');
+  assert.ok(
+    offeredTools(plan, 'plan', 0.9).length < full,
+    'a confident classification must still narrow',
+  );
+  // The fallbacks the router reaches for when nothing matches are exactly the
+  // cases this protects, so pin that they really do come back unconfident.
+  for (const q of [
+    'If I move to Dubai and my salary doubles but I lose tax benefits, what changes?',
+    'Is it worth switching jobs for a 20% raise?',
+  ]) {
+    assert.ok(classifyIntent(q).confidence < 0.5, `"${q}" should be recognised as a guess`);
+  }
+});
+
 /* -------------------------------------------------------------------------- */
 /* End-to-end agent                                                            */
 /* -------------------------------------------------------------------------- */
