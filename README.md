@@ -133,7 +133,9 @@ VITE_STATIC=true VITE_BASE=/BroadBridge/ npm run build --workspace @wealth/web
 
 **The one thing the static build cannot do is the AI assistant.** It needs a model, a model needs a key, and a key in a public bundle is a key anyone can read — so it says so rather than pretending. Run locally for that.
 
-To host the full stack instead, any Node host works: `npm run build`, then `npm start --workspace @wealth/server` with the client served statically and `/api` proxied to it.
+To host the full stack instead — a public URL **with** the assistant working — any Node host will do: `npm run build`, then `npm start --workspace @wealth/server` with the client served statically and `/api` proxied to it.
+
+Step by step for all three targets, plus every environment variable and a troubleshooting table: **[docs/DEPLOYMENT.md](docs/DEPLOYMENT.md)**.
 
 ---
 
