@@ -35,7 +35,6 @@ npm install
 npm run dev
 ```
 
-Open <http://localhost:5173>. Pick a sample profile or enter your own numbers.
 
 **No API key is needed.** With no credentials the agent still classifies the question, plans a toolchain, runs the financial engine and answers with grounded figures — it just narrates through a rule-based synthesiser instead of a model. Add credentials to switch the language model on:
 
