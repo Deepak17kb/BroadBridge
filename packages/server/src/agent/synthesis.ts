@@ -55,6 +55,41 @@ export function composeDeterministicAnswer(input: SynthesisInput): string {
   const snapshot = find<FinancialSnapshot>(input.runs, 'get_financial_snapshot');
 
   switch (input.intent) {
+    /*
+     * A greeting gets a greeting: one orienting line, then what to ask.
+     *
+     * The temptation is to answer with everything, since the snapshot is
+     * already in hand - which is what this used to do, meeting "hello" with a
+     * wellness score, a net worth, a weakest pillar and a recommendation. The
+     * headline number is worth offering unprompted because it is the one thing
+     * that says whether to worry. The rest is an answer to a question nobody
+     * asked, and it hides the thing a new user actually needs: knowing what
+     * this can be asked for.
+     */
+    case 'greeting': {
+      const name = profile.displayName.split(' ')[0];
+      if (!snapshot) {
+        paragraphs.push(
+          `Hello${name ? ` ${name}` : ''} - I can read your position, project any goal, run what-if scenarios against thousands of simulated markets and explain the reasoning behind any recommendation. What would you like to look at?`,
+        );
+        break;
+      }
+      paragraphs.push(
+        `Hello${name ? ` ${name}` : ''}. Your financial wellness score is currently ${snapshot.wellness.total}/100, grade ${snapshot.wellness.grade}.`,
+      );
+      paragraphs.push(
+        'Ask me anything about your money and I will work it out from your actual numbers rather than from rules of thumb. For example:',
+      );
+      paragraphs.push(
+        [
+          '- "Am I on track to retire?"',
+          '- "Which debt should I clear first?"',
+          '- "What happens if I save 5,000 more each month?"',
+          '- "What should I do next?"',
+        ].join('\n'),
+      );
+      break;
+    }
     case 'overview': {
       if (!snapshot) break;
       const onTrack = snapshot.goalProjections.filter((g) => g.onTrack).length;

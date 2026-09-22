@@ -170,6 +170,7 @@ export async function runAgent(opts: RunAgentOptions): Promise<AgentMessage> {
 
 function planRationale(intent: Intent, confidence: number): string {
   const map: Record<Intent, string> = {
+    greeting: 'Reading the headline position, so the answer starts from where this user actually stands.',
     overview: 'Reading the full position, then ranking what matters most.',
     goal: 'Projecting the goal to its target date, then stress-testing it against market variability.',
     whatif: 'Running the scenario through the planning engine and comparing it against the current plan.',

@@ -61,6 +61,34 @@ test('intents route to the right toolchain', () => {
   }
 });
 
+/**
+ * "hello" used to route to `overview`, which answers with the wellness score,
+ * the net worth, the weakest pillar and the top recommendation - a full report
+ * in reply to a greeting, and nothing about what the assistant can be asked.
+ *
+ * The second half of this test is the part that matters: a greeting attached to
+ * a real question must still be routed on the question.
+ */
+test('a greeting is answered as a greeting, but never hides a real question', () => {
+  for (const hello of ['hello', 'Hi', 'hey there', 'Namaste', 'good morning', 'thanks!', 'what can you do?']) {
+    assert.equal(classifyIntent(hello).intent, 'greeting', `"${hello}" should be a greeting`);
+  }
+  for (const [message, expected] of [
+    ['hi, am I on track to retire?', 'goal'],
+    ['hello - which debt should I clear first?', 'debt'],
+    ['hey what should I do next', 'actions'],
+  ] as const) {
+    assert.equal(
+      classifyIntent(message).intent,
+      expected,
+      `"${message}" must route on the question, not the greeting`,
+    );
+  }
+  // And it stays cheap: a hello must not trigger the full recommendation sweep.
+  const plan = heuristicPlan('greeting');
+  assert.deepEqual(plan.map((s) => s.tool), ['get_financial_snapshot', 'synthesize']);
+});
+
 test('every plan starts by reading the real position and ends by synthesising', () => {
   for (const intent of ['overview', 'goal', 'whatif', 'portfolio', 'actions', 'debt'] as const) {
     const plan = heuristicPlan(intent);
@@ -250,6 +278,7 @@ test('the verifier tolerates prose rounding but not invention', () => {
  * been checked against the offered set cannot reach production quietly.
  */
 const EVERY_INTENT: Record<Intent, true> = {
+  greeting: true,
   overview: true,
   goal: true,
   whatif: true,

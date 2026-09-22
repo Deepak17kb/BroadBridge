@@ -10,6 +10,7 @@ import type { AgentPlanStep, UserProfile } from '@wealth/shared';
  */
 
 export type Intent =
+  | 'greeting'
   | 'overview'
   | 'goal'
   | 'whatif'
@@ -117,6 +118,45 @@ const RULES: IntentRule[] = [
 ];
 
 /**
+ * A message that is *only* a pleasantry or an orientation question.
+ *
+ * Anchored at both ends, so it matches "hi" and "what can you do?" but not
+ * "hi, should I clear my card first" - and it is consulted only after every
+ * financial rule has scored zero, so a real question containing a greeting is
+ * never diverted here.
+ *
+ * "help" and "what can you do" belong with the greetings rather than with the
+ * advice intents: all three want the same answer, which is what to ask next.
+ */
+const GREETING = new RegExp(
+  '^ (?:' +
+    [
+      'h(?:i+|e+y+|ello|iya|owdy)(?: there)?',
+      'yo',
+      'sup',
+      "what'?s up",
+      'namaste',
+      'namaskar',
+      'greetings',
+      'good (?:morning|afternoon|evening|day)',
+      'thanks?(?: you)?',
+      'ty',
+      'ok(?:ay)?',
+      'cool',
+      'nice',
+      'great',
+      'bye',
+      'goodbye',
+      'who are you',
+      'what (?:can|do) you do',
+      'what can i ask',
+      'help',
+      'start',
+    ].join('|') +
+    ')[\\s!.?,]*$',
+);
+
+/**
  * An imperative verb plus a figure is a command, not a question.
  *
  * "Increase my Retirement contribution to 45000" must apply the change;
@@ -149,8 +189,24 @@ export function classifyIntent(message: string): { intent: Intent; confidence: n
     if (score > best.score) best = { intent: rule.intent, score };
   }
 
-  // Nothing matched: a short message is usually a greeting or a nudge, a long
-  // one is usually a question about the user's own position.
+  /*
+   * A greeting is answered as a greeting.
+   *
+   * This used to fall through to `overview`, so "hello" was met with a full
+   * balance sheet: the wellness score, the net worth, the weakest pillar and
+   * the top recommendation, unasked. That reads as a canned dump rather than
+   * an assistant, and it buries the one thing a first-time user needs, which
+   * is to know what they can ask for.
+   *
+   * Checked after the rules, not before, so "hi, am I on track to retire?"
+   * is still routed on the question rather than on the pleasantry.
+   */
+  if (best.score === 0 && GREETING.test(text)) {
+    return { intent: 'greeting', confidence: 0.9 };
+  }
+
+  // Nothing matched: a short message is usually a nudge, a long one is usually
+  // a question about the user's own position.
   if (best.score === 0) {
     return { intent: message.trim().length < 25 ? 'overview' : 'actions', confidence: 0.3 };
   }
@@ -289,6 +345,10 @@ export function heuristicPlan(intent: Intent): AgentPlanStep[] {
   const base = [step('get_financial_snapshot', 'Read the current financial position')];
 
   switch (intent) {
+    // One cheap call, not the full sweep: enough to greet someone by where
+    // they actually stand, without answering a question they did not ask.
+    case 'greeting':
+      return [...base, step('synthesize', 'Say hello and offer what to ask next')];
     case 'overview':
       return [
         ...base,
