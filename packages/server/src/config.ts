@@ -17,14 +17,28 @@
 
 export type LlmProvider = 'bedrock' | 'anthropic' | 'groq' | 'deterministic';
 
+/**
+ * One guarded read of the environment.
+ *
+ * Everything below goes through this because the module is also loaded in the
+ * browser - the agent runs client-side on the static build, where `process`
+ * does not exist. Every field then falls back to its default, which resolves
+ * the provider to `deterministic`: exactly right, since a browser bundle must
+ * never carry a model key anyway.
+ */
+function env(name: string): string | undefined {
+  if (typeof process === 'undefined' || !process.env) return undefined;
+  return process.env[name];
+}
+
 function envFlag(name: string, fallback = false): boolean {
-  const raw = process.env[name];
+  const raw = env(name);
   if (raw === undefined) return fallback;
   return ['1', 'true', 'yes', 'on'].includes(raw.toLowerCase());
 }
 
 function envInt(name: string, fallback: number): number {
-  const raw = process.env[name];
+  const raw = env(name);
   if (!raw) return fallback;
   const parsed = Number.parseInt(raw, 10);
   return Number.isFinite(parsed) ? parsed : fallback;
@@ -44,14 +58,14 @@ function stripTrailingSlashes(url: string): string {
 }
 
 function resolveProvider(): LlmProvider {
-  const forced = process.env.LLM_PROVIDER?.toLowerCase();
+  const forced = env('LLM_PROVIDER')?.toLowerCase();
   if (isProvider(forced)) return forced;
-  if (process.env.ANTHROPIC_API_KEY) return 'anthropic';
+  if (env('ANTHROPIC_API_KEY')) return 'anthropic';
   // Ordered after Anthropic deliberately: with both keys present the
   // first-party path wins, and GROQ_API_KEY alone is an unambiguous choice.
-  if (process.env.GROQ_API_KEY) return 'groq';
+  if (env('GROQ_API_KEY')) return 'groq';
   // Any Lambda/ECS task with a region and an execution role can reach Bedrock.
-  if (process.env.AWS_REGION && envFlag('ENABLE_BEDROCK', true) && process.env.AWS_LAMBDA_FUNCTION_NAME)
+  if (env('AWS_REGION') && envFlag('ENABLE_BEDROCK', true) && env('AWS_LAMBDA_FUNCTION_NAME'))
     return 'bedrock';
   return 'deterministic';
 }
@@ -115,30 +129,30 @@ export interface AppConfig {
 
 export const config: AppConfig = {
   port: envInt('PORT', 4000),
-  nodeEnv: process.env.NODE_ENV ?? 'development',
+  nodeEnv: env('NODE_ENV') ?? 'development',
   provider: resolveProvider(),
-  model: process.env.CLAUDE_MODEL ?? 'claude-opus-5',
+  model: env('CLAUDE_MODEL') ?? 'claude-opus-5',
   // 131k context, reliable tool use, and the best writer Groq serves.
-  groqModel: process.env.GROQ_MODEL ?? 'openai/gpt-oss-120b',
-  groqBaseUrl: stripTrailingSlashes(process.env.GROQ_BASE_URL ?? 'https://api.groq.com/openai/v1'),
+  groqModel: env('GROQ_MODEL') ?? 'openai/gpt-oss-120b',
+  groqBaseUrl: stripTrailingSlashes(env('GROQ_BASE_URL') ?? 'https://api.groq.com/openai/v1'),
   groqMaxTokens: envInt('GROQ_MAX_TOKENS', 1500),
   groqRetryBudgetMs: envInt('GROQ_RETRY_BUDGET_MS', 12_000),
-  awsRegion: process.env.AWS_REGION ?? 'ap-south-1',
-  tableName: process.env.TABLE_NAME,
-  corsOrigins: (process.env.CORS_ORIGINS ?? '*').split(',').map((s) => s.trim()),
+  awsRegion: env('AWS_REGION') ?? 'ap-south-1',
+  tableName: env('TABLE_NAME'),
+  corsOrigins: (env('CORS_ORIGINS') ?? '*').split(',').map((s) => s.trim()),
   maxAgentSteps: envInt('MAX_AGENT_STEPS', 6),
   // Only the Groq path is metered on tokens per minute tightly enough for the
   // schemas to be what runs it out, so only it narrows by default. The knob is
   // read by the orchestrator, which stays free of provider branching.
   agentToolScope:
-    process.env.AGENT_TOOL_SCOPE === 'plan' || process.env.AGENT_TOOL_SCOPE === 'all'
-      ? process.env.AGENT_TOOL_SCOPE
+    env('AGENT_TOOL_SCOPE') === 'plan' || env('AGENT_TOOL_SCOPE') === 'all'
+      ? (env('AGENT_TOOL_SCOPE') as 'plan' | 'all')
       : resolveProvider() === 'groq'
         ? 'plan'
         : 'all',
   simulationPaths: envInt('SIMULATION_PATHS', 2000),
   requestTimeoutMs: envInt('REQUEST_TIMEOUT_MS', 60_000),
-  logLevel: (process.env.LOG_LEVEL as AppConfig['logLevel']) ?? 'info',
+  logLevel: (env('LOG_LEVEL') as AppConfig['logLevel']) ?? 'info',
 };
 
 /**

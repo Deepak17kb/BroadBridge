@@ -16,6 +16,7 @@ import {
   runMonteCarlo,
   runScenario,
   scoreRisk,
+  type AgentEvent,
   type ChatSession,
   type ScenarioLevers,
   type UserProfile,
@@ -44,7 +45,7 @@ import { ApiError } from './apiError';
 
 const STORAGE_KEY = 'wealth-navigator/static-store';
 
-interface Persisted {
+export interface Persisted {
   profiles: Record<string, UserProfile>;
   sessions: Record<string, ChatSession>;
 }
@@ -89,6 +90,16 @@ function newId(): string {
   return `user-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 7)}`;
 }
 
+/**
+ * The store, for the in-browser agent.
+ *
+ * Exported rather than re-implemented next door: the agent has to read the
+ * profile it is answering about and append to the conversation it is part of,
+ * and a second copy of the storage key and the record shape is a drift waiting
+ * to happen.
+ */
+export const browserStore = { read, write };
+
 export const staticApi = {
   health: async () => ({
     status: 'ok',
@@ -98,14 +109,28 @@ export const staticApi = {
     time: new Date().toISOString(),
   }),
 
-  capabilities: async () => ({
-    engine: 'deterministic' as const,
-    model: null,
-    maxSteps: 0,
-    simulationPaths: 2000,
-    tools: [],
-    knowledgeBase: [],
-  }),
+  /**
+   * The real catalogue, not a placeholder: the agent in this build is the same
+   * one the server runs, so the panel reports what it can actually reach.
+   *
+   * Loaded dynamically like the agent itself. A static import here would pull
+   * the whole orchestrator into the entry chunk, and every visitor would
+   * download the agent to render a page that never asks it anything.
+   */
+  capabilities: async () => {
+    const [{ TOOLS }, { KNOWLEDGE_BASE }] = await Promise.all([
+      import('@agent/tools.js'),
+      import('@agent/knowledge/corpus.js'),
+    ]);
+    return {
+      engine: 'deterministic' as const,
+      model: null,
+      maxSteps: 6,
+      simulationPaths: 2000,
+      tools: TOOLS.map((t) => ({ name: t.name, label: t.label, description: t.description })),
+      knowledgeBase: KNOWLEDGE_BASE.map((d) => ({ id: d.id, title: d.title, tags: d.tags })),
+    };
+  },
 
   personas: async () =>
     PERSONAS.map((p) => ({
@@ -323,33 +348,53 @@ export const staticApi = {
     write(data);
   },
 
-  searchKnowledge: async () => [],
+  searchKnowledge: async (query: string) => {
+    // The retriever rather than an empty list: it is BM25 over the same corpus,
+    // and it is already in the bundle because the agent uses it.
+    const { retrieve } = await import('@agent/knowledge/retriever.js');
+    // `content` is the model's grounding context and is far too long for a
+    // list; the wire shape carries the snippet only.
+    return retrieve(query).map(({ id, title, score, snippet }) => ({ id, title, score, snippet }));
+  },
 };
 
 /**
- * The agent cannot run here, and saying so is the only honest option.
+ * The agent, run in the browser.
  *
- * Every other route in this file is a pure function of the profile, so the
- * browser answers it exactly. The agent is not: it needs a model, and a model
- * needs a key, which would have to be embedded in a public bundle for anyone to
- * read. So the stream reports the limitation through the same error path a
- * dropped connection uses, and the page renders its normal error state rather
- * than hanging on a request that will never arrive.
+ * There is no server here to stream from, so the client runs the orchestrator
+ * itself - the same one, imported as source. It loads on first use rather than
+ * with the app: the agent and its knowledge base are a sizeable chunk that most
+ * visits never open, and a dynamic import keeps them out of the initial bundle.
+ *
+ * The one thing it cannot do is call a model, because a model needs a key and a
+ * key in a public bundle is readable by anyone. So it runs in deterministic
+ * mode - planning, calling tools, grounding every figure, narrating from
+ * templates. See `agent/browserAgent.ts`.
  */
 export function staticStreamAgent(
-  _profileId: string,
-  _message: string,
-  _sessionId: string | undefined,
-  handlers: { onError: (error: string) => void },
+  profileId: string,
+  message: string,
+  sessionId: string | undefined,
+  handlers: {
+    onEvent: (event: AgentEvent) => void;
+    onDone: () => void;
+    onError: (error: string) => void;
+  },
 ): () => void {
-  const timer = setTimeout(
-    () =>
-      handlers.onError(
-        'The assistant needs the API server, which this static deployment does not run. ' +
-          'Clone the repo and run npm run dev to use it - every other page works here, ' +
-          'computed in your browser by the same finance engine.',
-      ),
-    0,
-  );
-  return () => clearTimeout(timer);
+  let cancel: (() => void) | null = null;
+  let cancelled = false;
+
+  void import('./agent/browserAgent')
+    .then(({ runBrowserAgent }) => {
+      if (cancelled) return;
+      cancel = runBrowserAgent(profileId, message, sessionId, handlers);
+    })
+    .catch(() => {
+      if (!cancelled) handlers.onError('The assistant could not be loaded. Reload and try again.');
+    });
+
+  return () => {
+    cancelled = true;
+    cancel?.();
+  };
 }

@@ -333,12 +333,13 @@ export function Assistant() {
       </header>
 
       {IS_STATIC ? (
-        <Callout tone="warning">
-          This is the static build, which has no API server behind it — so the assistant is the one
-          thing here that cannot run. It needs a model, and a model needs a key, which would be
-          readable by anyone in a public bundle. Every other page works and is computed in your
-          browser by the same finance engine. Clone the repo and run <code>npm run dev</code> to use
-          the assistant.
+        <Callout tone="info">
+          This build has no API server, so the agent is running <b>in your browser</b> — the same
+          orchestrator, the same tools, the same grounding check on every figure. What it cannot do
+          here is call a language model, because a model needs a key and a key in a public bundle is
+          readable by anyone. So it plans and answers with its rule-based engine: the arithmetic is
+          identical, the wording is less fluent than a model's. Run it locally with{' '}
+          <code>ANTHROPIC_API_KEY</code> or <code>GROQ_API_KEY</code> set for the prose.
         </Callout>
       ) : (
         capabilities?.engine === 'deterministic' && (

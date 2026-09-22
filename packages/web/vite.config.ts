@@ -16,12 +16,41 @@ import { fileURLToPath } from 'node:url';
  */
 const base = process.env.VITE_BASE ?? '/';
 
+const llmShim = fileURLToPath(new URL('./src/lib/agent/llmShim.ts', import.meta.url));
+
+/**
+ * Lets the agent run in the browser by swapping out the one module that cannot.
+ *
+ * On the static build there is no server, so the client runs the agent itself -
+ * the same orchestrator, the same fourteen tools, the same grounding check. All
+ * of it is portable except `agent/llm.ts`, which loads the Anthropic SDK and
+ * needs an API key, and a key in a public bundle is a key anyone can read.
+ *
+ * The swap is keyed on the importer rather than on the specifier alone, so a
+ * `./llm.js` anywhere else in the app is untouched. It is a plugin rather than
+ * an alias entry because an alias matches the specifier only, and `./llm.js`
+ * on its own is far too broad a thing to redirect.
+ */
+function agentLlmShim() {
+  return {
+    name: 'agent-llm-shim',
+    enforce: 'pre' as const,
+    resolveId(source: string, importer?: string) {
+      if (source !== './llm.js' || !importer) return null;
+      return importer.replace(/\\/g, '/').includes('/server/src/agent/') ? llmShim : null;
+    },
+  };
+}
+
 export default defineConfig({
   base,
-  plugins: [react()],
+  plugins: [agentLlmShim(), react()],
   resolve: {
     alias: {
       '@wealth/shared': fileURLToPath(new URL('../shared/src/index.ts', import.meta.url)),
+      // The agent, imported as source like the finance engine, so the browser
+      // runs the same orchestrator the server does rather than a second copy.
+      '@agent': fileURLToPath(new URL('../server/src/agent', import.meta.url)),
       '@': fileURLToPath(new URL('./src', import.meta.url)),
     },
   },
