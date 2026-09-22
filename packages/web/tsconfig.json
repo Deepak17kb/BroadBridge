@@ -10,7 +10,8 @@
       // Mirrors the Vite alias: the agent is imported as source so the browser
       // runs the same orchestrator the server does. `.js` specifiers are the
       // server's ESM convention and resolve to the `.ts` beside them.
-      "@agent/*": ["../server/src/agent/*"]
+      "@agent/*": ["../server/src/agent/*"],
+      "@server/*": ["../server/src/*"]
     }
   },
   "include": ["src/**/*.ts", "src/**/*.tsx", "test/**/*.ts", "test/**/*.tsx", "vite.config.ts"]

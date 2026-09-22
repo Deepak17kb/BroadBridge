@@ -10,7 +10,7 @@ import {
   type Citation,
   type UserProfile,
 } from '@wealth/shared';
-import { type AppConfig, config } from '../config.js';
+import { agentToolScopeOverride, type AppConfig, config } from '../config.js';
 import { logger } from '../lib/logger.js';
 import { classifyIntent, heuristicPlan, heuristicToolInput, type Intent } from './intent.js';
 import { retrieve } from './knowledge/retriever.js';
@@ -383,7 +383,14 @@ async function runWithModel(
   args: PhaseArgs & { llm: NonNullable<Awaited<ReturnType<typeof getLlm>>> },
 ): Promise<AgentMessage> {
   const { llm } = args;
-  const tools = offeredTools(args.plan, config.agentToolScope, args.confidence);
+  /*
+   * Asked of the client in hand, not of the environment: on the static build
+   * the config cannot see a key the visitor typed into their own browser, so
+   * it reports `deterministic` and would widen the catalogue on exactly the
+   * provider that is metered per minute.
+   */
+  const scope = agentToolScopeOverride ?? (llm.provider === 'groq' ? 'plan' : 'all');
+  const tools = offeredTools(args.plan, scope, args.confidence);
 
   // The user's position is injected up front. It costs a few hundred tokens and
   // removes an entire round-trip for the common case where the model would

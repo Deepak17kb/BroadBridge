@@ -51,6 +51,7 @@ export default defineConfig({
       // The agent, imported as source like the finance engine, so the browser
       // runs the same orchestrator the server does rather than a second copy.
       '@agent': fileURLToPath(new URL('../server/src/agent', import.meta.url)),
+      '@server': fileURLToPath(new URL('../server/src', import.meta.url)),
       '@': fileURLToPath(new URL('./src', import.meta.url)),
     },
   },

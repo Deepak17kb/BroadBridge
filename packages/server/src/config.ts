@@ -57,6 +57,22 @@ function stripTrailingSlashes(url: string): string {
   return url.slice(0, end);
 }
 
+/**
+ * An explicit `AGENT_TOOL_SCOPE`, or undefined to let the live provider decide.
+ *
+ * The scope below is derived from `resolveProvider()`, which reads the
+ * environment - and in the browser there is none, so it always says
+ * `deterministic` and the scope always widens to `all`. That is wrong once the
+ * visitor connects their own Groq key: the browser is then talking to the same
+ * per-minute-metered endpoint the server does, and needs the same narrowing.
+ * The orchestrator therefore asks the client it actually holds, and only falls
+ * back to this when an operator has set the variable by hand.
+ */
+export const agentToolScopeOverride: 'plan' | 'all' | undefined =
+  env('AGENT_TOOL_SCOPE') === 'plan' || env('AGENT_TOOL_SCOPE') === 'all'
+    ? (env('AGENT_TOOL_SCOPE') as 'plan' | 'all')
+    : undefined;
+
 function resolveProvider(): LlmProvider {
   const forced = env('LLM_PROVIDER')?.toLowerCase();
   if (isProvider(forced)) return forced;
@@ -144,12 +160,7 @@ export const config: AppConfig = {
   // Only the Groq path is metered on tokens per minute tightly enough for the
   // schemas to be what runs it out, so only it narrows by default. The knob is
   // read by the orchestrator, which stays free of provider branching.
-  agentToolScope:
-    env('AGENT_TOOL_SCOPE') === 'plan' || env('AGENT_TOOL_SCOPE') === 'all'
-      ? (env('AGENT_TOOL_SCOPE') as 'plan' | 'all')
-      : resolveProvider() === 'groq'
-        ? 'plan'
-        : 'all',
+  agentToolScope: agentToolScopeOverride ?? (resolveProvider() === 'groq' ? 'plan' : 'all'),
   simulationPaths: envInt('SIMULATION_PATHS', 2000),
   requestTimeoutMs: envInt('REQUEST_TIMEOUT_MS', 60_000),
   logLevel: (env('LOG_LEVEL') as AppConfig['logLevel']) ?? 'info',

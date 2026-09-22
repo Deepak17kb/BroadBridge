@@ -21,6 +21,8 @@ import {
   type ScenarioLevers,
   type UserProfile,
 } from '@wealth/shared';
+import { readModelKey } from './agent/browserKey';
+import { DEFAULT_BROWSER_MODEL } from './agent/browserLlm';
 import { ApiError } from './apiError';
 
 /**
@@ -35,9 +37,10 @@ import { ApiError } from './apiError';
  * which `localStorage` does well enough for one person on one machine.
  *
  * So this is not a mock and not a reduced demo: the numbers come from the same
- * code and the same assumptions. The one thing it cannot do is the agent, which
- * needs a model and therefore a key that must never reach a public bundle -
- * `staticStreamAgent` says so rather than pretending.
+ * code and the same assumptions. The agent runs here too, in the browser -
+ * deterministically by default, or against a real model once the visitor
+ * connects a key of their own, which is the only way a public bundle can reach
+ * one without publishing somebody's credential.
  *
  * Selected at build time by `VITE_STATIC`, so the network client is tree-shaken
  * out of the Pages bundle and this file out of every other build.
@@ -101,13 +104,16 @@ function newId(): string {
 export const browserStore = { read, write };
 
 export const staticApi = {
-  health: async () => ({
-    status: 'ok',
-    version: 'static',
-    engine: 'deterministic' as const,
-    model: null,
-    time: new Date().toISOString(),
-  }),
+  health: async () => {
+    const connected = readModelKey();
+    return {
+      status: 'ok',
+      version: 'static',
+      engine: connected ? ('groq' as const) : ('deterministic' as const),
+      model: connected ? DEFAULT_BROWSER_MODEL : null,
+      time: new Date().toISOString(),
+    };
+  },
 
   /**
    * The real catalogue, not a placeholder: the agent in this build is the same
@@ -122,9 +128,12 @@ export const staticApi = {
       import('@agent/tools.js'),
       import('@agent/knowledge/corpus.js'),
     ]);
+    const connected = readModelKey();
     return {
-      engine: 'deterministic' as const,
-      model: null,
+      // Reported from what is stored now, not from a build-time constant: the
+      // visitor can connect or disconnect a key between two questions.
+      engine: connected ? ('groq' as const) : ('deterministic' as const),
+      model: connected ? DEFAULT_BROWSER_MODEL : null,
       maxSteps: 6,
       simulationPaths: 2000,
       tools: TOOLS.map((t) => ({ name: t.name, label: t.label, description: t.description })),

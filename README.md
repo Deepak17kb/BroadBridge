@@ -131,9 +131,13 @@ VITE_STATIC=true VITE_BASE=/BroadBridge/ npm run build --workspace @wealth/web
 
 `VITE_STATIC` selects `staticApi.ts`, so the bundle answers its own calls from the shared engine and keeps the profile in `localStorage`. `VITE_BASE` sets the project-site path, and `404.html` is a copy of `index.html` because Pages has no rewrite rules and a deep link would otherwise die on refresh.
 
-**The one thing the static build cannot do is the AI assistant.** It needs a model, a model needs a key, and a key in a public bundle is a key anyone can read — so it says so rather than pretending. Run locally for that.
+**The assistant runs here too.** The agent — the same orchestrator, the same fourteen tools, the same BM25 retrieval, the same grounding check — is compiled into the bundle and runs client-side, loaded on first use so a visitor who never opens it never downloads it.
 
-To host the full stack instead — a public URL **with** the assistant working — any Node host will do: `npm run build`, then `npm start --workspace @wealth/server` with the client served statically and `/api` proxied to it.
+By default it answers with its rule-based engine, because a model needs a key and a key in a public bundle is a key anyone can read, so none ships. But Groq sends `access-control-allow-origin: *`, so a browser may call it directly — and the Assistant page offers to connect a key **you** own. It is held in your browser's `localStorage`, sent only to `api.groq.com` by your own browser, and never reaches this site or this repository. Connect one and the live link answers with a real model; disconnect and it falls back.
+
+Verified on every build: the published bundle contains no key-shaped string at all. The only Groq reference in it is the endpoint URL.
+
+To host the full stack instead — a public URL where the model works for *everyone*, with the key server-side — any Node host will do: `npm run build`, then `npm start --workspace @wealth/server` with the client served statically and `/api` proxied to it.
 
 Step by step for all three targets, plus every environment variable and a troubleshooting table: **[docs/DEPLOYMENT.md](docs/DEPLOYMENT.md)**.
 
