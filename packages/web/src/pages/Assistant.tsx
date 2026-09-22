@@ -9,7 +9,7 @@ import {
   type Currency,
   type VerificationCheck,
 } from '@wealth/shared';
-import { api, streamAgent, type AgentCapabilities } from '../lib/api';
+import { api, IS_STATIC, streamAgent, type AgentCapabilities } from '../lib/api';
 import { useLoadedProfile, useProfile } from '../state/ProfileContext';
 import { AssumptionList, Badge, Callout, Card, Icon } from '../components/ui';
 import { MonteCarloFan, TableToggle } from '../components/charts/Charts';
@@ -332,14 +332,23 @@ export function Assistant() {
         )}
       </header>
 
-      {capabilities?.engine === 'deterministic' && (
-        <Callout tone="info">
-          No model credentials are configured, so the assistant is planning and answering with its
-          rule-based engine. It still classifies the question, runs the same tools and grounds every
-          figure — the wording is just less fluent than a model's. Set{' '}
-          <code>ANTHROPIC_API_KEY</code> or <code>GROQ_API_KEY</code>, or deploy to AWS where the
-          Lambda role reaches Bedrock, to switch it on.
+      {IS_STATIC ? (
+        <Callout tone="warning">
+          This is the static build, which has no API server behind it — so the assistant is the one
+          thing here that cannot run. It needs a model, and a model needs a key, which would be
+          readable by anyone in a public bundle. Every other page works and is computed in your
+          browser by the same finance engine. Clone the repo and run <code>npm run dev</code> to use
+          the assistant.
         </Callout>
+      ) : (
+        capabilities?.engine === 'deterministic' && (
+          <Callout tone="info">
+            No model credentials are configured, so the assistant is planning and answering with its
+            rule-based engine. It still classifies the question, runs the same tools and grounds
+            every figure — the wording is just less fluent than a model's. Set{' '}
+            <code>ANTHROPIC_API_KEY</code> or <code>GROQ_API_KEY</code> to switch it on.
+          </Callout>
+        )
       )}
 
       {/* Conversation history. Collapsed by default so it never competes with

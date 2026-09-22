@@ -33,6 +33,15 @@ const ENV = (import.meta as { env?: Record<string, string | undefined> }).env;
 const BASE = ENV?.VITE_API_URL ?? '';
 const STATIC = ENV?.VITE_STATIC === 'true';
 
+/**
+ * Whether this build answers its own calls in the browser.
+ *
+ * The UI needs it because "no server" and "a server with no model credentials"
+ * are different situations that would otherwise look identical: both report the
+ * deterministic engine, but only one of them can actually answer a question.
+ */
+export const IS_STATIC = STATIC;
+
 export { ApiError };
 
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
