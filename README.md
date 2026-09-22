@@ -1,15 +1,30 @@
 # AI Wealth Navigator
 
-<!-- Replace OWNER/REPO once the GitHub remote exists; docs/DEPLOYMENT.md (Part 3, one-time setup) has the exact steps. -->
-[![CI](https://github.com/OWNER/REPO/actions/workflows/ci.yml/badge.svg)](https://github.com/OWNER/REPO/actions/workflows/ci.yml)
-[![Deploy](https://github.com/OWNER/REPO/actions/workflows/deploy.yml/badge.svg)](https://github.com/OWNER/REPO/actions/workflows/deploy.yml)
-![Tests](https://img.shields.io/badge/tests-117%20passing-brightgreen)
+[![CI](https://github.com/Deepak17kb/BroadBridge/actions/workflows/ci.yml/badge.svg)](https://github.com/Deepak17kb/BroadBridge/actions/workflows/ci.yml)
+[![Pages](https://github.com/Deepak17kb/BroadBridge/actions/workflows/pages.yml/badge.svg)](https://github.com/Deepak17kb/BroadBridge/actions/workflows/pages.yml)
+![Tests](https://img.shields.io/badge/tests-239%20passing-brightgreen)
 ![Node](https://img.shields.io/badge/node-%3E%3D20-blue)
 ![Licence](https://img.shields.io/badge/data-synthetic%20only-orange)
 
 An AI-powered financial wellness platform. It reads a user's actual position, projects every goal, lets them explore what-if scenarios against thousands of simulated markets, and produces ranked next-best actions — each one showing the arithmetic and the assumptions behind it.
 
+### ▶ **[Try it live →](https://deepak17kb.github.io/BroadBridge/)**
+
+No install, no sign-up. Pick a sample profile and the whole platform lights up — every figure computed in your browser by the same engine the server runs.
+
 **All data is synthetic. Nothing here is financial advice.**
+
+---
+
+## The demo, in five minutes
+
+▶ **[Watch the full walkthrough (MP4)](docs/media/broadbridge-demo.mp4)** — 5 minutes, no narration, so it can be presented over.
+
+![A walkthrough of the dashboard, goals, a market crash in the Scenario Lab, the ranked actions, and the agent answering a question with its reasoning trace](docs/media/broadbridge-demo.gif)
+
+It covers the dashboard and what the advice is worth, the wellness pillars and their arithmetic, goal funding, a −30% market crash applied live in the Scenario Lab, the ranked actions, and the agent answering a question with its reasoning trace and a grounding check on every figure.
+
+The presenter's script — the words to say, the timings, and the questions to expect — is in **[docs/DEMO_SCRIPT_5MIN.md](docs/DEMO_SCRIPT_5MIN.md)**.
 
 ---
 
@@ -22,10 +37,10 @@ npm run dev
 
 Open <http://localhost:5173>. Pick a sample profile or enter your own numbers.
 
-**No API key is needed.** With no credentials the agent still classifies the question, plans a toolchain, runs the financial engine and answers with grounded figures — it just narrates through a rule-based synthesiser instead of Claude. Add credentials to switch the language model on:
+**No API key is needed.** With no credentials the agent still classifies the question, plans a toolchain, runs the financial engine and answers with grounded figures — it just narrates through a rule-based synthesiser instead of a model. Add credentials to switch the language model on:
 
 ```bash
-export ANTHROPIC_API_KEY=sk-ant-...   # or deploy to AWS and use Bedrock
+export ANTHROPIC_API_KEY=sk-ant-...   # or GROQ_API_KEY=gsk_... for open-weights models
 ```
 
 The active engine is shown in the sidebar and returned by `GET /api/health`, so it is never ambiguous which one produced an answer.
@@ -50,23 +65,26 @@ The active engine is shown in the sidebar and returned by `GET /api/health`, so 
 ## Architecture in one picture
 
 ```
-          ┌──────────────── CloudFront (one origin) ────────────────┐
-          │                                                         │
-   S3 ◄───┤  /  and /assets/*          /api/*  ──► HTTP API         │
-   React  │                                          │              │
-   bundle └──────────────────────────────────────────┼──────────────┘
-                                                     ▼
-                                              Lambda (Node 22)
-                                              Express + agent
-                                                │        │
-                                    DynamoDB ◄──┘        └──► Bedrock
-                                  (single table)              (Claude)
+   Full stack (npm run dev)              Static (GitHub Pages)
+   ─────────────────────────             ─────────────────────
+   React client  :5173                   React client
+        │  /api/*                             │
+        ▼                                     ▼
+   Express + agent  :4000              staticApi.ts  ── localStorage
+        │        │                            │
+        │        └──► Claude / Groq           │
+        ▼                                     ▼
+   ┌──────────────────────────────────────────────────┐
+   │   @wealth/shared — the finance engine            │
+   │   projections · Monte Carlo · actions · scoring  │
+   └──────────────────────────────────────────────────┘
 ```
 
-**The load-bearing idea:** one financial engine, `@wealth/shared`, imported as TypeScript source by both the browser and the Lambda.
+**The load-bearing idea:** one financial engine, `@wealth/shared`, imported as TypeScript source by the browser and the server alike.
 
 - The browser runs it for instant slider feedback — no round trip to see a what-if.
 - The agent's tools call the same functions server-side.
+- On GitHub Pages, where there is no server at all, the client answers its own calls from that same engine — so the numbers are identical rather than approximated.
 - There is no second implementation, so the number on the slider and the number the AI quotes cannot disagree.
 
 **The second load-bearing idea:** the model narrates, it never calculates. Every figure comes from a tool result, and a verifier re-checks each number in the answer against the tool outputs that produced it. Unmatched figures are reported as unverified rather than trusted.
@@ -79,13 +97,13 @@ Full detail, including the decisions and their trade-offs: **[docs/ARCHITECTURE.
 
 ```
 packages/
-  shared/    Domain types, market assumptions, the whole finance engine + 46 tests
-  server/    Express API, agent orchestrator, tools, BM25 retrieval + 42 tests
-  web/       React 18 + Vite client + 29 smoke-render tests
-infra/       AWS CDK stack (CloudFront, S3, HTTP API, Lambda, DynamoDB, Bedrock IAM)
-docs/        Architecture, deployment guide, API reference, demo script, slide deck
-.github/     CI and deploy workflows
-buildspec.yml  AWS CodeBuild equivalent of the CI pipeline
+  shared/    Domain types, market assumptions, the whole finance engine + 106 tests
+  server/    Express API, agent orchestrator, tools, BM25 retrieval + 91 tests
+  web/       React 18 + Vite client + 42 render and a11y tests
+               lib/api.ts        the network client
+               lib/staticApi.ts  the same surface, answered in the browser
+docs/        Architecture, API reference, demo scripts, slide deck, demo recording
+.github/     ci.yml (typecheck, test, build) and pages.yml (publish the static site)
 ```
 
 ---
@@ -95,40 +113,39 @@ buildspec.yml  AWS CodeBuild equivalent of the CI pipeline
 ```bash
 npm run dev         # API on :4000 and the client on :5173, both watching
 npm run typecheck   # All four packages
-npm test            # 117 tests: engine arithmetic, API + agent, page renders
+npm test            # 239 tests: engine arithmetic, API + agent, page renders
 npm run lint        # ESLint, zero warnings tolerated
-npm run build       # Lambda bundle + static client bundle
+npm run build       # Server bundle + static client bundle
 npm run verify      # typecheck + test + build, the same gate CI runs
-npm run synth       # Build, then synthesize the CDK stack
-npm run deploy      # Build, then deploy to AWS
 ```
 
 ---
 
 ## Deploying
 
+The live site is published by **[.github/workflows/pages.yml](.github/workflows/pages.yml)** on every push to `main`. It needs no secrets:
+
 ```bash
-npm run build
-cd infra
-npx cdk bootstrap                  # once per account and region
-npx cdk deploy WealthNavigator-prod -c stage=prod
+VITE_STATIC=true VITE_BASE=/BroadBridge/ npm run build --workspace @wealth/web
 ```
 
-The stack outputs an `AppUrl`. Requires Claude model access enabled in Amazon Bedrock for your region — without it the deployment still works and runs the deterministic engine, and the deploy workflow prints a warning saying so.
+`VITE_STATIC` selects `staticApi.ts`, so the bundle answers its own calls from the shared engine and keeps the profile in `localStorage`. `VITE_BASE` sets the project-site path, and `404.html` is a copy of `index.html` because Pages has no rewrite rules and a deep link would otherwise die on refresh.
 
-Step-by-step, including IAM setup and cost estimates: **[docs/DEPLOYMENT.md](docs/DEPLOYMENT.md)**.
+**The one thing the static build cannot do is the AI assistant.** It needs a model, a model needs a key, and a key in a public bundle is a key anyone can read — so it says so rather than pretending. Run locally for that.
+
+To host the full stack instead, any Node host works: `npm run build`, then `npm start --workspace @wealth/server` with the client served statically and `/api` proxied to it.
 
 ---
 
 ## What is tested
 
-117 tests, all runnable with `npm test` and no credentials.
+239 tests, all runnable with `npm test` and no credentials.
 
-**Engine (46)** — the maths is the product, so it is tested as such. Solver round-trips (the contribution the engine says is required is fed back through the projection and must land on the target), reproducibility of every seeded simulation, percentile band ordering, and the variance-drag correction that stops a Monte Carlo from silently overstating the median. Invariants hold for all three personas: net worth reconciles, pillar weights sum to 1, allocations sum to 1, actions arrive ranked and every one carries assumptions.
+**Engine (106)** — the maths is the product, so it is tested as such. Solver round-trips (the contribution the engine says is required is fed back through the projection and must land on the target), reproducibility of every seeded simulation, percentile band ordering, and the variance-drag correction that stops a Monte Carlo from silently overstating the median. Invariants hold for all three personas: net worth reconciles, pillar weights sum to 1, allocations sum to 1, actions arrive ranked and every one carries assumptions.
 
-**API and agent (42)** — real HTTP against a listening server, so serialisation and status codes are exercised. Intent routing, natural-language lever extraction, BM25 retrieval accuracy, every tool's output shape, the grounding verifier, SSE frame validity, and a full conversation round-trip. One test asserts that the persona with 42% credit-card debt is told to clear it before investing.
+**API and agent (91)** — real HTTP against a listening server, so serialisation and status codes are exercised. Intent routing, natural-language lever extraction, BM25 retrieval accuracy, every tool's output shape, the grounding verifier, SSE frame validity, and a full conversation round-trip. One test asserts that the persona with 42% credit-card debt is told to clear it before investing.
 
-**Client (29)** — every page server-side rendered for all three personas plus an empty profile, asserting no `NaN`, `undefined` or `Infinity` reaches the user. This is the layer a typecheck cannot cover.
+**Client (42)** — every page server-side rendered for all three personas plus an empty profile, asserting no `NaN`, `undefined` or `Infinity` reaches the user. This is the layer a typecheck cannot cover.
 
 ---
 
